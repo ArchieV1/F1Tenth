@@ -40,6 +40,9 @@ private:
     int brake_mux_idx;
     // ***Add mux index for new planner here***
     // int new_mux_idx;
+    int ftg_mux_idx;
+    int pp_mux_idx;
+    int scanm_mux_idx;
 
     // Mux controller array
     std::vector<bool> mux_controller;
@@ -53,6 +56,9 @@ private:
     int nav_button_idx;
     // ***Add button index for new planner here***
     // int new_button_idx;
+    int ftg_button_idx;
+    int pp_button_idx;
+    int scanm_button_idx;
 
     // Key indices
     std::string joy_key_char;
@@ -62,6 +68,9 @@ private:
     std::string nav_key_char;
     // ***Add key char for new planner here***
     // int new_key_char;
+    std::string ftg_key_char;
+    std::string pp_key_char;
+    std::string scanm_key_char;
 
     // Is ebrake on? (not engaged, but on)
     bool safety_on;
@@ -119,6 +128,9 @@ public:
         n.getParam("nav_mux_idx", nav_mux_idx);
         // ***Add mux index for new planner here***
         // n.getParam("new_mux_idx", new_mux_idx);
+        n.getParam("ftg_mux_idx", ftg_mux_idx);
+        n.getParam("pp_mux_idx", pp_mux_idx);
+        n.getParam("scanm_mux_idx", scanm_mux_idx);
 
         // Get button indices
         n.getParam("joy_button_idx", joy_button_idx);
@@ -128,6 +140,9 @@ public:
         n.getParam("nav_button_idx", nav_button_idx);
         // ***Add button index for new planner here***
         // n.getParam("new_button_idx", new_button_idx);
+        n.getParam("ftg_button_idx", ftg_button_idx);
+        n.getParam("pp_button_idx", pp_button_idx);
+        n.getParam("scanm_button_idx", scanm_button_idx);
 
         // Get key indices
         n.getParam("joy_key_char", joy_key_char);
@@ -137,6 +152,9 @@ public:
         n.getParam("nav_key_char", nav_key_char);
         // ***Add key char for new planner here***
         // n.getParam("new_key_char", new_key_char);
+        n.getParam("ftg_key_char", ftg_key_char);
+        n.getParam("pp_key_char", pp_key_char);
+        n.getParam("scanm_key_char", scanm_key_char);
 
         // Initialize the mux controller 
         n.getParam("mux_size", mux_size);
@@ -317,6 +335,18 @@ public:
         //  // new planner
         //  toggle_mux(new_mux_idx, "New Planner");
         // }
+        if (msg.buttons[ftg_button_idx]) {
+            // new planner
+            toggle_mux(ftg_mux_idx, "FTG Planner");
+        }
+        if (msg.buttons[pp_button_idx]) {
+            // new planner
+            toggle_mux(pp_mux_idx, "PP Planner");
+        }
+        if (msg.buttons[scanm_button_idx]) {
+            // new planner
+            toggle_mux(scanm_mux_idx, "Scan Match Planner");
+        }
 
     }
 
@@ -350,6 +380,18 @@ public:
         //  // new planner
         //  toggle_mux(new_mux_idx, "New Planner");
         // }
+        if (msg.data == ftg_key_char) {
+           // new planner
+           toggle_mux(ftg_mux_idx, "FTG Planner");
+        }
+        if (msg.data == pp_key_char) {
+           // new planner
+           toggle_mux(pp_mux_idx, "PP Planner");
+        }
+        if (msg.data == scanm_key_char) {
+           // new planner
+           toggle_mux(scanm_mux_idx, "Scan Match Planner");
+        }
 
     }
 

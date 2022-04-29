@@ -91,6 +91,14 @@ if(DEFINED CATKIN_DEVEL_PREFIX)
       add_dependencies(${_node_name} f1tenth_simulator_generate_messages_cpp)
   endforeach()
 
+  catkin_install_python(PROGRAMS
+    scripts/purepursuit.py
+    scripts/followthegap.py
+    scripts/scanmatching.py
+    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+
+
   # Install the library
   install(TARGETS ${PROJECT_NAME}
       ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}

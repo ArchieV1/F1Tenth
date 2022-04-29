@@ -4,7 +4,16 @@
   <node pkg="joy" name="joy_node" type="joy_node"/>
 
   <!-- Launch a map from the maps folder-->
-  <arg name="map" default="$(find f1tenth_simulator)/maps/levine.yaml"/>
+<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/levine.yaml"/>-->
+  <!-- good ones look like:
+  porto
+  levine_blocked
+  torino
+
+  The ones inside /f1tenth_racetracks/ all have waypoints for algorithms to follow (Eg Pure Pursuit)
+  They are all much larger though so speeds need to be increased
+  -->
+  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Austin/Austin_map.yaml"/>
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map)"/>
 
   <!-- Launch the racecar model -->
@@ -41,7 +50,23 @@
           <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   	 </node>    -->
 
-  
+    <!-- Launch self driving modes -->
+  <node pkg="f1tenth_simulator" name="ftg"  type="followthegap.py" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
+  <node pkg="f1tenth_simulator" name="pure_pur"  type="purepursuit.py" output="screen" args="$(arg map)">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
+  <node pkg="f1tenth_simulator" name="scan_match"  type="scanmatching.py" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
+  <node pkg="f1tenth_simulator" name="waypoint_logger"  type="waypoint_logger.py" output="screen">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
   <!-- Launch RVIZ -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find f1tenth_simulator)/launch/simulator.rviz" output="screen"/>
+  <node pkg="rviz" type="rviz" name="rviz" args="-d $(find f1tenth_simulator)/launch/simulator.rviz" output="screen"/>
 </launch>

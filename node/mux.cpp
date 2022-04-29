@@ -129,6 +129,27 @@ public:
         // n.getParam("new_drive_topic", new_drive_topic);
         // n.getParam("new_mux_idx", new_mux_idx);
         // add_channel(new_drive_topic, drive_topic, new_mux_idx);
+
+        // FTG = Follow the gap
+        int ftg_mux_idx;
+        std::string ftg_drive_topic;
+        n.getParam("ftg_drive_topic", ftg_drive_topic);
+        n.getParam("ftg_mux_idx", ftg_mux_idx);
+        add_channel(ftg_drive_topic, drive_topic, ftg_mux_idx);
+
+        // PP = Pure Pursuit
+        int pp_mux_idx;
+        std::string pp_drive_topic;
+        n.getParam("pp_drive_topic", pp_drive_topic);
+        n.getParam("pp_mux_idx", pp_mux_idx);
+        add_channel(pp_drive_topic, drive_topic, pp_mux_idx);
+
+        // Scanm = Scan Match
+        int scanm_mux_idx;
+        std::string scanm_drive_topic;
+        n.getParam("scanm_drive_topic", scanm_drive_topic);
+        n.getParam("scanm_mux_idx", scanm_mux_idx);
+        add_channel(scanm_drive_topic, drive_topic, scanm_mux_idx);
     }
 
     void add_channel(std::string channel_name, std::string drive_topic, int mux_idx_) {
