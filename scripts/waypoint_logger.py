@@ -14,6 +14,7 @@ from nav_msgs.msg import Odometry
 home = expanduser('~')
 file = open(strftime(home+'/rcws/logs/wp-%Y-%m-%d-%H-%M-%S',gmtime())+'.csv', 'w')
 
+
 def save_waypoint(data):
     quaternion = np.array([data.pose.pose.orientation.x, 
                            data.pose.pose.orientation.y, 
@@ -23,23 +24,27 @@ def save_waypoint(data):
     euler = tf.transformations.euler_from_quaternion(quaternion)
     speed = LA.norm(np.array([data.twist.twist.linear.x, 
                               data.twist.twist.linear.y, 
-                              data.twist.twist.linear.z]),2)
-    if data.twist.twist.linear.x>0.:
-        print data.twist.twist.linear.x
+                              data.twist.twist.linear.z]), 2)
+
+    if data.twist.twist.linear.x > 0.:
+        print(data.twist.twist.linear.x)
 
     file.write('%f, %f, %f, %f\n' % (data.pose.pose.position.x,
                                      data.pose.pose.position.y,
                                      euler[2],
                                      speed))
 
+
 def shutdown():
     file.close()
     print('Goodbye')
- 
+
+
 def listener():
     rospy.init_node('waypoints_logger', anonymous=True)
     rospy.Subscriber('pf/pose/odom', Odometry, save_waypoint)
     rospy.spin()
+
 
 if __name__ == '__main__':
     atexit.register(shutdown)
