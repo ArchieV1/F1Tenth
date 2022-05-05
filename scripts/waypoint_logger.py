@@ -12,7 +12,7 @@ from nav_msgs.msg import Odometry
 # Credits: https://github.com/f1tenth/f1tenth_labs/blob/main/waypoint_logger/scripts/waypoint_logger.py
 
 home = expanduser('~')
-file = open(strftime(home+'/rcws/logs/wp-%Y-%m-%d-%H-%M-%S',gmtime())+'.csv', 'w')
+file = open(strftime(home+'/catkin_ws/src/f1tenth_simulator/logs/wp-%Y-%m-%d-%H-%M-%S', gmtime())+'.csv', 'w')
 
 
 def save_waypoint(data):
@@ -42,11 +42,14 @@ def shutdown():
 
 def listener():
     rospy.init_node('waypoints_logger', anonymous=True)
-    rospy.Subscriber('pf/pose/odom', Odometry, save_waypoint)
+    # rospy.Subscriber('pf/pose/odom', Odometry, save_waypoint)
+    rospy.Subscriber('odom', Odometry, save_waypoint)
+
     rospy.spin()
 
 
 if __name__ == '__main__':
+    exit(999)
     atexit.register(shutdown)
     print('Saving waypoints...')
     try:

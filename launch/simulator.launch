@@ -51,19 +51,19 @@
   	 </node>    -->
 
     <!-- Launch self driving modes -->
-  <node pkg="f1tenth_simulator" name="ftg"  type="followthegap.py" output="screen">
+  <node pkg="f1tenth_simulator" name="ftg"  type="followthegap.py">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 
-  <node pkg="f1tenth_simulator" name="pure_pur"  type="purepursuit.py" output="screen" args="$(arg map)">
+  <node pkg="f1tenth_simulator" name="pure_pur"  type="purepursuit.py" args="$(arg map)">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 
-  <node pkg="f1tenth_simulator" name="scan_match"  type="scanmatching.py" output="screen">
+  <node pkg="f1tenth_simulator" name="scan_match"  type="scanmatching.py">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 
-  <node pkg="f1tenth_simulator" name="waypoint_logger"  type="waypoint_logger.py" output="screen">
+  <node pkg="f1tenth_simulator" name="waypoint_logger"  type="waypoint_logger.py">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 

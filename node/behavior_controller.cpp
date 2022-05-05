@@ -267,7 +267,7 @@ public:
 
     void toggle_mux(int mux_idx, std::string driver_name) {
         // This takes in an index and the name of the planner/driver and 
-        // toggles the mux appropiately
+        // toggles the mux appropriately
         if (mux_controller[mux_idx]) {
             ROS_INFO_STREAM(driver_name << " turned off");
             mux_controller[mux_idx] = false;
@@ -336,18 +336,17 @@ public:
         //  toggle_mux(new_mux_idx, "New Planner");
         // }
         if (msg.buttons[ftg_button_idx]) {
-            // new planner
+            // Follow the gap
             toggle_mux(ftg_mux_idx, "FTG Planner");
         }
         if (msg.buttons[pp_button_idx]) {
-            // new planner
+            // Pure pursuit
             toggle_mux(pp_mux_idx, "PP Planner");
         }
         if (msg.buttons[scanm_button_idx]) {
-            // new planner
+            // Scan matching
             toggle_mux(scanm_mux_idx, "Scan Match Planner");
         }
-
     }
 
     void key_callback(const std_msgs::String & msg) {
@@ -381,15 +380,15 @@ public:
         //  toggle_mux(new_mux_idx, "New Planner");
         // }
         if (msg.data == ftg_key_char) {
-           // new planner
+           // Follow the gap
            toggle_mux(ftg_mux_idx, "FTG Planner");
         }
         if (msg.data == pp_key_char) {
-           // new planner
+           // Pure pursuit
            toggle_mux(pp_mux_idx, "PP Planner");
         }
         if (msg.data == scanm_key_char) {
-           // new planner
+           // Scan matching
            toggle_mux(scanm_mux_idx, "Scan Match Planner");
         }
 

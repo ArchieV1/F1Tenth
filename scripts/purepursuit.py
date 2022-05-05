@@ -2,6 +2,7 @@
 import io
 import sys
 import time
+from math import sqrt, degrees, radians
 from typing import TextIO, List
 
 import roslaunch
@@ -10,8 +11,10 @@ import tf
 import yaml
 import numpy as np
 from argparse import Namespace
+import pandas as pd
 
 from ackermann_msgs.msg import AckermannDriveStamped
+from geometry_msgs.msg import PoseStamped, Pose
 from nav_msgs.msg import Odometry
 from numba import njit
 from pyglet.gl import GL_POINTS
@@ -275,55 +278,91 @@ def main2():
 class PurePursuit:
     SCAN_TOPIC = "scan"
     ODOM_TOPIC = "odom"
+    POSE_TOPIC = "gt_pose"
     DRIVE_TOPIC = "pp_drive"
+
+    LOOKAHEAD_DEFAULT = 4
 
     STRAIGHTS_SPEED = 5.0
     CORNERS_SPEED = 3.0
     STRAIGHTS_STEERING_ANGLE = np.pi / 18  # 10 degrees
 
-    def __init__(self, raceline_uri: str):
-        rospy.loginfo(raceline_uri)
+    target_ind = None
+    target_dist = None
 
-        names = "centerline" in raceline_uri
-        self.waypoints = np.genfromtxt(raceline_uri, delimiter=",",
-                                       dtype=float, names=names)
+    viable_waypoints = None  # Waypoints that are ahead of the car to make sure it doesnt try and 180 spin
+    VIABLE_WAYPOINT_ANGLE = radians(70)  # Positive number in radians. Will look +- this number to find viable waypoints
 
-        self.odom_subscriber = rospy.Subscriber(self.ODOM_TOPIC, Odometry, self.odom_callback, queue_size=1)
+    def __init__(self, waypoints: pd.DataFrame, lookahead: float = LOOKAHEAD_DEFAULT):
+        self.waypoints = waypoints
+        self.lookahead = lookahead
+
+        self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=1)
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=100)
 
-    def odom_callback(self, odometry: Odometry):
-        # Get pose of car
-        orient = odometry.pose.pose.orientation
-        pos = odometry.pose.pose.position
+    def pose_callback(self, pose_stamped: PoseStamped):
+        pose = pose_stamped.pose
+        header = pose_stamped.header
 
-        # Transformation matrix (Translation + rotation)
-        matrix = np.zeros((4, 4))
-        rotation = np.array([orient.x, orient.y, orient.z, orient.w])
-        rotation = tf.transformations.quaternion_matrix(rotation)[:3, :3]
-        translation = np.array([pos.x, pos.y, pos.z])
-        matrix[:3, :3] = rotation
-        matrix[:3, 3] = translation
-        matrix[-1, -1] = 1
+        # Generate df of waypoints to be used
+        self.calc_viable_waypoints()
 
-        # construct x,y,z,k input
-        n = len(self.waypoints)
-        ipt = np.zeros((4, n))
-        ipt[:2, :] = self.waypoints.T
-        ipt[3, :] = 1
+        target_waypoint = self.find_nearest_waypoint(pose)
 
-        # transform to base link (car's frame)
-        opt = np.linalg.inv(matrix).dot(ipt)
-        xy = opt[:2, :].T  # transformed
-        xy[xy[:, 0] < 0] = 10  # filter points behind the car
+        rospy.loginfo(target_waypoint)
+        rospy.loginfo(f"{self.target_dist} =?= {self.lookahead}")
 
-        # select target point
-        distance = np.sum(xy ** 2, axis=1)
-        idx = np.argmin(np.absolute(distance - 1))
-        target_x, target_y = xy[idx]
+        angle = self.calc_drive_angle(pose, target_waypoint)
+        self.publish_drive_msg(angle)
 
-        # Steer
-        steering_angle = 2 * target_y / 1
-        self.publish_drive_msg(steering_angle)
+    def calc_viable_waypoints(self) -> None:
+        # Want all values where:
+        # y > tan(A)x
+        # y > -tan(A)x
+        # Where x and y are relative to the car's current position
+
+        # TODO implement
+        self.viable_waypoints = self.waypoints
+        return
+
+    # Find nearest waypoint to lookahead distance
+    def find_nearest_waypoint(self, pose: Pose) -> int:
+        smallest_diff = float("inf")
+        shortest_ind = 0
+
+        for i, row in self.viable_waypoints.iterrows():
+            # rospy.loginfo(row)
+            # rospy.loginfo(row[0])
+            dist_from_car = self.distance_between_points(row[0], row[1], pose.position.x, pose.position.y)
+            diff_dist_lookahead = abs(self.lookahead - dist_from_car)
+
+            if diff_dist_lookahead < smallest_diff:
+                shortest_ind = i
+                smallest_diff = diff_dist_lookahead
+
+                rospy.loginfo(f"{smallest_diff} =?= {self.lookahead}\t{i}")
+
+        self.target_dist = smallest_diff
+        self.target_ind = shortest_ind
+
+        return shortest_ind
+
+    def distance_between_points(self, point1_x: float, point1_y: float, point2_x: float, point2_y: float) -> float:
+        x_diff = point1_x - point2_x
+        y_diff = point1_y - point2_y
+
+        return sqrt(x_diff ** 2 + y_diff ** 2)
+
+    def calc_drive_angle(self, pose: Pose, target_waypoint: int) -> float:
+        # arc = (2|y|) / L^2
+        # y = Current pos `y` to waypoint pos `y`
+        # L = Lookahead
+
+        waypoint_y = self.viable_waypoints["y"].iloc[target_waypoint]
+        rospy.loginfo(waypoint_y)
+        d_y = pose.position.y - waypoint_y
+
+        return 2 * abs(d_y) / self.lookahead ** 2
 
     def publish_drive_msg(self, angle: float):
         # Get the final steering angle and speed value
@@ -332,13 +371,6 @@ class PurePursuit:
         else:
             speed = self.STRAIGHTS_SPEED
 
-        # if -np.pi / 18 < angle < np.pi / 18:
-        #     velocity = 2.5
-        # elif -np.pi / 9 < angle <= -np.pi / 18 or np.pi / 18 <= angle < np.pi / 9:
-        #     velocity = 2.5
-        # else:
-        #     velocity = 2.5
-
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = rospy.Time.now()
         drive_msg.header.frame_id = "laser"
@@ -346,22 +378,31 @@ class PurePursuit:
         drive_msg.drive.steering_angle = angle
         drive_msg.drive.speed = speed
 
+        rospy.loginfo(degrees(drive_msg.drive.steering_angle))
         self.drive_publisher.publish(drive_msg)
 
 
 def main(args: List[str]):
-    rospy.init_node("pure_pursuit")
+    rospy.init_node("pure_pursuit", anonymous=True)
+    time.sleep(1)
     # Load raceline (The path to follow on this map)
     map_uri = args[1]
+
     # raceline_uri = map_uri.replace("map.yaml", "raceline.csv")
     # raceline_uri = map_uri.replace("map.yaml", "DonkeySim_waypoints.txt")
+
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
-    pure_pursuit = PurePursuit(raceline_uri)
+    # waypoints = pd.DataFrame(np.genfromtxt(raceline_uri, delimiter=",", dtype=float, names=True))
+    waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
+    waypoints.rename(columns={"# x_m": "x", " y_m": "y"}, inplace=True)
+
+    _ = PurePursuit(waypoints)
 
     rospy.spin()
 
 
 if __name__ == '__main__':
+    print("PP running...")
     try:
         main(sys.argv)
     except rospy.ROSInterruptException:

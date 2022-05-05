@@ -136,6 +136,7 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    print("FTG running...")
     try:
         main()
     except rospy.ROSInterruptException:

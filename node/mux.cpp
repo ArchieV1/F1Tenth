@@ -261,7 +261,7 @@ public:
 /// Channel class method implementations
 
 Channel::Channel() {
-    ROS_INFO("Channel intialized without proper information");
+    ROS_INFO("Channel initialized without proper information");
     Channel("", "", -1, nullptr);
 }
 
