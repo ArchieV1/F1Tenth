@@ -2,7 +2,7 @@
 import io
 import sys
 import time
-from math import sqrt, degrees, radians
+from math import sqrt, degrees, radians, cos, acos, sin, tan
 from typing import TextIO, List
 
 import roslaunch
@@ -286,6 +286,7 @@ class PurePursuit:
     STRAIGHTS_SPEED = 5.0
     CORNERS_SPEED = 3.0
     STRAIGHTS_STEERING_ANGLE = np.pi / 18  # 10 degrees
+    STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
     target_ind = None
     target_dist = None
@@ -305,25 +306,54 @@ class PurePursuit:
         header = pose_stamped.header
 
         # Generate df of waypoints to be used
-        self.calc_viable_waypoints()
+        rospy.loginfo(f"Total {len(self.waypoints)}")
+        self.calc_viable_waypoints(pose)
+        rospy.loginfo(f"Viable {len(self.viable_waypoints)}")
 
         target_waypoint = self.find_nearest_waypoint(pose)
 
-        rospy.loginfo(target_waypoint)
-        rospy.loginfo(f"{self.target_dist} =?= {self.lookahead}")
+        rospy.loginfo(f"Target: {target_waypoint}")
 
         angle = self.calc_drive_angle(pose, target_waypoint)
         self.publish_drive_msg(angle)
 
-    def calc_viable_waypoints(self) -> None:
+    def calc_viable_waypoints(self, pose: Pose) -> None:
+        # https://www.desmos.com/calculator/iyfqwa20wz
+        # Convert global coords to local coords (of the car)
+        # https://gamedev.stackexchange.com/a/109377
+        # Checked this answer and think is correct
+        columns = ["x", "y"]
+        rel_waypoints = pd.DataFrame(columns=columns)
+        for i, row in self.waypoints.iterrows():
+
+            relativeX = row[0] - pose.position.x
+            relativeY = row[1] - pose.position.y
+
+            angle = 2*acos(pose.orientation.w)  # In rad
+            # https://stackoverflow.com/questions/3825571/how-to-convert-quaternion-to-angle
+            rotatedX = cos(-angle) * relativeX - sin(-angle) * relativeY
+            rotatedY = cos(-angle) * relativeY + sin(-angle) * relativeX
+
+            df = pd.DataFrame([[rotatedX, rotatedY]], columns=columns)
+            rel_waypoints = pd.concat([rel_waypoints, df])
+
+        rel_waypoints.reset_index(drop=True, inplace=True)
+
+        # Get all values in front of the car
         # Want all values where:
         # y > tan(A)x
         # y > -tan(A)x
-        # Where x and y are relative to the car's current position
 
-        # TODO implement
-        self.viable_waypoints = self.waypoints
-        return
+        # arctan(y/x) > theta
+        # arctan(y/-x) > theta
+        waypoints = pd.DataFrame(columns=columns)
+        for i, row in rel_waypoints.iterrows():
+            if row[1] > tan(self.VIABLE_WAYPOINT_ANGLE) and row[1] > -tan(self.VIABLE_WAYPOINT_ANGLE):
+                df = pd.DataFrame([[row[0], row[1]]], columns=columns)
+                waypoints = pd.concat([waypoints, df])
+
+        waypoints.reset_index(drop=True, inplace=True)  # Stop every index being "0"
+        self.viable_waypoints = waypoints
 
     # Find nearest waypoint to lookahead distance
     def find_nearest_waypoint(self, pose: Pose) -> int:
@@ -340,7 +370,7 @@ class PurePursuit:
                 shortest_ind = i
                 smallest_diff = diff_dist_lookahead
 
-                rospy.loginfo(f"{smallest_diff} =?= {self.lookahead}\t{i}")
+                # rospy.loginfo(f"{dist_from_car} == {self.lookahead} +- {smallest_diff}\t{i}")
 
         self.target_dist = smallest_diff
         self.target_ind = shortest_ind
@@ -359,7 +389,6 @@ class PurePursuit:
         # L = Lookahead
 
         waypoint_y = self.viable_waypoints["y"].iloc[target_waypoint]
-        rospy.loginfo(waypoint_y)
         d_y = pose.position.y - waypoint_y
 
         return 2 * abs(d_y) / self.lookahead ** 2
@@ -378,7 +407,7 @@ class PurePursuit:
         drive_msg.drive.steering_angle = angle
         drive_msg.drive.speed = speed
 
-        rospy.loginfo(degrees(drive_msg.drive.steering_angle))
+        rospy.loginfo(f"Angle {degrees(drive_msg.drive.steering_angle)}")
         self.drive_publisher.publish(drive_msg)
 
 
