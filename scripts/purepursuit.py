@@ -326,13 +326,14 @@ class PurePursuit:
         rel_waypoints = pd.DataFrame(columns=columns)
         for i, row in self.waypoints.iterrows():
 
-            relativeX = row[0] - pose.position.x
-            relativeY = row[1] - pose.position.y
+            d_x = row[0] - pose.position.x
+            d_y = row[1] - pose.position.y
 
-            angle = 2*acos(pose.orientation.w)  # In rad
             # https://stackoverflow.com/questions/3825571/how-to-convert-quaternion-to-angle
-            rotatedX = cos(-angle) * relativeX - sin(-angle) * relativeY
-            rotatedY = cos(-angle) * relativeY + sin(-angle) * relativeX
+            theta = 2 * acos(pose.orientation.w)  # In rad
+
+            rotatedX = d_x * cos(theta) + d_y * sin(theta)
+            rotatedY = d_y * sin(theta) - d_x * cos(theta)
 
             df = pd.DataFrame([[rotatedX, rotatedY]], columns=columns)
             rel_waypoints = pd.concat([rel_waypoints, df])
