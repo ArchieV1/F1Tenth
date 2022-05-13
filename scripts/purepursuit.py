@@ -297,8 +297,8 @@ class PurePursuit:
     target_dist_diff = None
 
     local_viable_waypoints = None
-    """Waypoints that are ahead of the car and withing reasonable MAX_WAYPOINT_LOOKAHEAD > X > MIN_WAYPOINT_LOOKAHEAD"""
-    VIABLE_WAYPOINT_ANGLE = radians(70)
+    """Waypoints that are ahead of the car and within reasonable MAX_WAYPOINT_LOOKAHEAD > X > MIN_WAYPOINT_LOOKAHEAD"""
+    VIABLE_WAYPOINT_ANGLE = radians(90)
     """Positive number in radians. Will look +- this number to find viable waypoints"""
 
     header = None
@@ -350,7 +350,7 @@ class PurePursuit:
                 self.pose_current.orientation.z,
                 self.pose_current.orientation.w]
         rot = Rotation.from_quat(quat)
-        self.global_curr_angle = rot.as_euler('xyz', degrees=True)[2]
+        self.global_curr_angle = rot.as_euler('xyz', degrees=False)[2]
 
         rospy.loginfo(f"Angle: {round(degrees(self.global_curr_angle), 2)}")
 
@@ -376,13 +376,19 @@ class PurePursuit:
         """
             Returns true is no previous pose or if no target
         """
-        return self.pose_previous is None or self.global_tar_x is None or self.global_tar_y is None
+        if self.pose_previous is None or self.global_tar_x is None or self.global_tar_y is None:
+            rospy.loginfo(f"FirstMove")
+            return True
+        return False
 
     def is_not_moving(self) -> bool:
         """
             Returns true if current pos is different to last pos
         """
-        return self.pose_current.position.x == self.pose_previous.position.x and self.pose_current.position.y == self.pose_previous.position.y
+        if self.pose_current.position.x == self.pose_previous.position.x and self.pose_current.position.y == self.pose_previous.position.y:
+            rospy.loginfo(f"NotMoving")
+            return True
+        return False
 
     def has_reached_target(self, error: float = 0.10) -> bool:
         """
@@ -394,7 +400,11 @@ class PurePursuit:
 
         x = self.global_curr_x
         y = self.global_curr_y
-        return t_x - error <= x <= t_x + error and t_y - error <= y <= t_y + error
+
+        if t_x - error <= x <= t_x + error and t_y - error <= y <= t_y + error:
+            rospy.loginfo("")
+            return True
+        return False
 
     def calc_viable_waypoints(self) -> None:
         """
@@ -432,12 +442,22 @@ class PurePursuit:
             x = row[0]
             y = row[1]
 
-            if y >= 0:
-                if x == 0 or atan(y / x) > self.VIABLE_WAYPOINT_ANGLE:
-                    distance_from_car = self.distance_to_point(x, y)
-                    if self.MAX_WAYPOINT_DISTANCE > distance_from_car > self.MIN_WAYPOINT_DISTANCE:
-                        df = pd.DataFrame([[x, y]], columns=columns)
-                        waypoints = pd.concat([waypoints, df])
+            # # rospy.loginfo(f"({x}, {y})")
+            # if y != 0 and x != 0:  # Not underneath car
+            #     if y >= 0:  # In front of car
+            #         # rospy.loginfo(f"{y} >= 0")
+            #         if x == 0 or atan(y / x) > self.VIABLE_WAYPOINT_ANGLE:  # Within the viable angle
+            #             # rospy.loginfo(f"{x} == 0 OR greater than angle")
+            #             distance_from_car = self.distance_to_point(x, y)
+            #             if True:  # self.MAX_WAYPOINT_DISTANCE > distance_from_car > self.MIN_WAYPOINT_DISTANCE:
+            #                 # rospy.loginfo(f"{distance_from_car} within range {self.MIN_WAYPOINT_DISTANCE} - {self.MAX_WAYPOINT_DISTANCE}")
+            #                 df = pd.DataFrame([[x, y]], columns=columns)
+            #                 waypoints = pd.concat([waypoints, df])
+
+            # If in front of car
+            if y > 0:
+                df = pd.DataFrame([[x, y]], columns=columns)
+                waypoints = pd.concat([waypoints, df])
 
         waypoints.reset_index(drop=True, inplace=True)  # Stop every index being "0"
 
@@ -634,6 +654,7 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
     # Check f1tenth subscriber is active
     while initialpose_publisher.get_num_connections() < 1:  # Set to 2 if using `rostopic echo /initialpose`
         time.sleep(0.05)
+        rospy.loginfo("Waiting for subscribers before positioning car")
 
     rospy.loginfo(f"Moving car to:\n{message}")
     initialpose_publisher.publish(message)
