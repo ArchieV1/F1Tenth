@@ -16,10 +16,10 @@ file = open(strftime(home+'/catkin_ws/src/f1tenth_simulator/logs/wp-%Y-%m-%d-%H-
 
 
 def save_waypoint(data):
-    quaternion = np.array([data.pose.pose.orientation.x, 
-                           data.pose.pose.orientation.y, 
-                           data.pose.pose.orientation.z, 
-                           data.pose.pose.orientation.w])
+    quaternion = np.array([data.pose_current.pose_current.orientation.x,
+                           data.pose_current.pose_current.orientation.y,
+                           data.pose_current.pose_current.orientation.z,
+                           data.pose_current.pose_current.orientation.w])
 
     euler = tf.transformations.euler_from_quaternion(quaternion)
     speed = LA.norm(np.array([data.twist.twist.linear.x, 
@@ -29,8 +29,8 @@ def save_waypoint(data):
     if data.twist.twist.linear.x > 0.:
         print(data.twist.twist.linear.x)
 
-    file.write('%f, %f, %f, %f\n' % (data.pose.pose.position.x,
-                                     data.pose.pose.position.y,
+    file.write('%f, %f, %f, %f\n' % (data.pose_current.pose_current.position.x,
+                                     data.pose_current.pose_current.position.y,
                                      euler[2],
                                      speed))
 

@@ -17,7 +17,7 @@ class FollowTheGap:
 
     STRAIGHTS_SPEED = 5.0
     CORNERS_SPEED = 3.0
-    STRAIGHTS_STEERING_ANGLE = np.pi / 18  # 10 degrees
+    STRAIGHTS_STEERING_ANGLE = radians(10)
 
     def __init__(self):
         # used when calculating the angles of the LiDAR data

@@ -2,7 +2,7 @@
 import io
 import sys
 import time
-from math import sqrt, degrees, radians, cos, acos, sin, tan
+from math import sqrt, degrees, radians, cos, acos, sin, tan, atan
 from typing import TextIO, List
 
 import roslaunch
@@ -14,12 +14,14 @@ from argparse import Namespace
 import pandas as pd
 
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import PoseStamped, Pose
+from geometry_msgs.msg import PoseStamped, Pose, Quaternion, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from numba import njit
 from pyglet.gl import GL_POINTS
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
+from tf.transformations import quaternion_from_euler
+from scipy.spatial.transform import Rotation
 
 """
 Planner Helpers
@@ -276,126 +278,284 @@ def main2():
 
 
 class PurePursuit:
-    SCAN_TOPIC = "scan"
-    ODOM_TOPIC = "odom"
-    POSE_TOPIC = "gt_pose"
-    DRIVE_TOPIC = "pp_drive"
+    POSE_TOPIC = "/gt_pose"
+    DRIVE_TOPIC = "/pp_drive"
 
-    LOOKAHEAD_DEFAULT = 4
+    LOOKAHEAD_DEFAULT = 2
+    __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
+    MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
+    MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
 
-    STRAIGHTS_SPEED = 5.0
-    CORNERS_SPEED = 3.0
-    STRAIGHTS_STEERING_ANGLE = np.pi / 18  # 10 degrees
+    STRAIGHTS_SPEED = 5.0 / 10
+    CORNERS_SPEED = 3.0 / 10
+    STRAIGHTS_STEERING_ANGLE = radians(10)
     STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
-    target_ind = None
-    target_dist = None
+    WHEELBASE = 0.3302
+    """Constant from car size"""
 
-    viable_waypoints = None  # Waypoints that are ahead of the car to make sure it doesnt try and 180 spin
-    VIABLE_WAYPOINT_ANGLE = radians(70)  # Positive number in radians. Will look +- this number to find viable waypoints
+    target_dist_diff = None
+
+    local_viable_waypoints = None
+    """Waypoints that are ahead of the car and withing reasonable MAX_WAYPOINT_LOOKAHEAD > X > MIN_WAYPOINT_LOOKAHEAD"""
+    VIABLE_WAYPOINT_ANGLE = radians(70)
+    """Positive number in radians. Will look +- this number to find viable waypoints"""
+
+    header = None
+    global_waypoints = None
+    """Global coords"""
+    lookahead_dist = None
+    """Lookahead distance in metres"""
+
+    pose_subscriber = None
+    drive_publisher = None
+
+    pose_previous = None
+    pose_current = None
+
+    # Current pos global
+    global_curr_x = None
+    global_curr_y = None
+    global_curr_angle = None
+    # Local current everything will always be `0`
+
+    # Current target global and local
+    global_tar_x = None
+    global_tar_y = None
+    local_tar_x = None
+    local_tar_y = None
 
     def __init__(self, waypoints: pd.DataFrame, lookahead: float = LOOKAHEAD_DEFAULT):
-        self.waypoints = waypoints
-        self.lookahead = lookahead
+        self.global_waypoints = waypoints
+        self.lookahead_dist = lookahead
 
-        self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=1)
-        self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=100)
+        time.sleep(2)
+
+        self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=10)
+        self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
 
     def pose_callback(self, pose_stamped: PoseStamped):
-        pose = pose_stamped.pose
-        header = pose_stamped.header
+        rospy.loginfo("==========PP POSE_CALLBACK==========")
+        self.pose_current = pose_stamped.pose
+        self.header = pose_stamped.header
 
-        # Generate df of waypoints to be used
-        rospy.loginfo(f"Total {len(self.waypoints)}")
-        self.calc_viable_waypoints(pose)
-        rospy.loginfo(f"Viable {len(self.viable_waypoints)}")
+        self.global_curr_x = self.pose_current.position.x
+        self.global_curr_y = self.pose_current.position.y
 
-        target_waypoint = self.find_nearest_waypoint(pose)
+        # self.global_curr_angle = (2 * np.pi) - (2 * acos(self.pose_current.orientation.w))
+        # self.global_curr_angle = 2 * acos(self.pose_current.orientation.w)
 
-        rospy.loginfo(f"Target: {target_waypoint}")
+        quat = [self.pose_current.orientation.x,
+                self.pose_current.orientation.y,
+                self.pose_current.orientation.z,
+                self.pose_current.orientation.w]
+        rot = Rotation.from_quat(quat)
+        self.global_curr_angle = rot.as_euler('xyz', degrees=True)[2]
 
-        angle = self.calc_drive_angle(pose, target_waypoint)
-        self.publish_drive_msg(angle)
+        rospy.loginfo(f"Angle: {round(degrees(self.global_curr_angle), 2)}")
 
-    def calc_viable_waypoints(self, pose: Pose) -> None:
-        # https://www.desmos.com/calculator/iyfqwa20wz
+        # If it has either reached target or isn't moving (eg Planner was turned off) then calculate new target to go to
+        if self.is_first_move() or self.is_not_moving() or self.has_reached_target():
+            # Generate df of waypoints to be used
+            self.calc_viable_waypoints()
+            rospy.loginfo(f"Viable: {len(self.local_viable_waypoints)}")
+
+            self.find_target()
+
+            angle = self.calc_drive_angle()
+            self.publish_drive_msg(angle)
+        else:
+            rospy.loginfo(
+                f"Not reached target ({round(self.global_tar_x, 2)}, {round(self.global_tar_y, 2)}). Current:"
+                f"({round(self.pose_current.position.x, 2)}, {round(self.pose_current.position.y, 2)}) (Previous"
+                f"({round(self.pose_previous.position.x, 2)}, {round(self.pose_previous.position.y, 2)})")
+
+        self.pose_previous = self.pose_current
+
+    def is_first_move(self) -> bool:
+        """
+            Returns true is no previous pose or if no target
+        """
+        return self.pose_previous is None or self.global_tar_x is None or self.global_tar_y is None
+
+    def is_not_moving(self) -> bool:
+        """
+            Returns true if current pos is different to last pos
+        """
+        return self.pose_current.position.x == self.pose_previous.position.x and self.pose_current.position.y == self.pose_previous.position.y
+
+    def has_reached_target(self, error: float = 0.10) -> bool:
+        """
+            Returns True if car's current x AND y coords are within error of target coords
+        """
+
+        t_x = self.global_tar_x
+        t_y = self.global_tar_y
+
+        x = self.global_curr_x
+        y = self.global_curr_y
+        return t_x - error <= x <= t_x + error and t_y - error <= y <= t_y + error
+
+    def calc_viable_waypoints(self) -> None:
+        """
+            Calculates dataframe of viable waypoints
+            Assigns self.viable_waypoints
+
+            Viable waypoints are:
+                Within +-VIABLE_WAYPOINT_ANGLE rad of the direction of the car
+                In front of the car
+                Greater than MIN_WAYPOINT_DISTANCE away
+                Less than MAX_WAYPOINT_DISTANCE way
+        """
+
         # Convert global coords to local coords (of the car)
-        # https://gamedev.stackexchange.com/a/109377
-        # Checked this answer and think is correct
         columns = ["x", "y"]
-        rel_waypoints = pd.DataFrame(columns=columns)
-        for i, row in self.waypoints.iterrows():
+        local_waypoints = pd.DataFrame(columns=columns)
+        for i, row in self.global_waypoints.iterrows():
+            x, y = self.global_to_local_coords(row[0], row[1])
 
-            d_x = row[0] - pose.position.x
-            d_y = row[1] - pose.position.y
+            df = pd.DataFrame([[x, y]], columns=columns)
+            local_waypoints = pd.concat([local_waypoints, df])
 
-            # https://stackoverflow.com/questions/3825571/how-to-convert-quaternion-to-angle
-            theta = 2 * acos(pose.orientation.w)  # In rad
-
-            rotatedX = d_x * cos(theta) + d_y * sin(theta)
-            rotatedY = d_y * sin(theta) - d_x * cos(theta)
-
-            df = pd.DataFrame([[rotatedX, rotatedY]], columns=columns)
-            rel_waypoints = pd.concat([rel_waypoints, df])
-
-        rel_waypoints.reset_index(drop=True, inplace=True)
+        local_waypoints.reset_index(drop=True, inplace=True)
 
         # Get all values in front of the car
-        # Want all values where:
-        # y > tan(A)x
-        # y > -tan(A)x
 
-        # arctan(y/x) > theta
-        # arctan(y/-x) > theta
+        # Angle created by the x/y of the coords greater than wanted angle
+        # |arctan(y/x)| > theta
+        # Constraints:
+        # x != 0  # Will break the division
+        # y >= 0
+
         waypoints = pd.DataFrame(columns=columns)
-        for i, row in rel_waypoints.iterrows():
-            if row[1] > tan(self.VIABLE_WAYPOINT_ANGLE) and row[1] > -tan(self.VIABLE_WAYPOINT_ANGLE):
-                df = pd.DataFrame([[row[0], row[1]]], columns=columns)
-                waypoints = pd.concat([waypoints, df])
+        for i, row in local_waypoints.iterrows():
+            x = row[0]
+            y = row[1]
+
+            if y >= 0:
+                if x == 0 or atan(y / x) > self.VIABLE_WAYPOINT_ANGLE:
+                    distance_from_car = self.distance_to_point(x, y)
+                    if self.MAX_WAYPOINT_DISTANCE > distance_from_car > self.MIN_WAYPOINT_DISTANCE:
+                        df = pd.DataFrame([[x, y]], columns=columns)
+                        waypoints = pd.concat([waypoints, df])
 
         waypoints.reset_index(drop=True, inplace=True)  # Stop every index being "0"
-        self.viable_waypoints = waypoints
 
-    # Find nearest waypoint to lookahead distance
-    def find_nearest_waypoint(self, pose: Pose) -> int:
-        smallest_diff = float("inf")
-        shortest_ind = 0
+        self.local_viable_waypoints = waypoints
 
-        for i, row in self.viable_waypoints.iterrows():
-            # rospy.loginfo(row)
-            # rospy.loginfo(row[0])
-            dist_from_car = self.distance_between_points(row[0], row[1], pose.position.x, pose.position.y)
-            diff_dist_lookahead = abs(self.lookahead - dist_from_car)
+        if len(self.local_viable_waypoints) == 0:
+            rospy.logerr(f"No Viable Waypoints\n"
+                         f"Global Waypoints: {self.global_waypoints}\n\n"
+                         f"Local Waypoints: {local_waypoints}\n\n"
+                         f"Viable Waypoints: {self.local_viable_waypoints}")
+            exit()
 
-            if diff_dist_lookahead < smallest_diff:
-                shortest_ind = i
-                smallest_diff = diff_dist_lookahead
+    def find_target(self) -> None:
+        """
+            Find the nearest waypoint to LOOKAHEAD
+            Sets:
+                self.target_dist_diff to the signed difference of the distance of the target from the car to LOOKAHEAD
+                self.target_ind to the index of the target waypoint in self.viable_waypoints
+        """
 
-                # rospy.loginfo(f"{dist_from_car} == {self.lookahead} +- {smallest_diff}\t{i}")
+        smallest_diff_val = float("inf")
+        smallest_diff_ind = 0
 
-        self.target_dist = smallest_diff
-        self.target_ind = shortest_ind
+        for i, row in self.local_viable_waypoints.iterrows():
+            dist_from_car = self.distance_to_point(row[0], row[1])
+            diff_dist_lookahead = dist_from_car - self.lookahead_dist
 
-        return shortest_ind
+            if abs(diff_dist_lookahead) < abs(smallest_diff_val):
+                smallest_diff_ind = i
+                smallest_diff_val = diff_dist_lookahead
 
-    def distance_between_points(self, point1_x: float, point1_y: float, point2_x: float, point2_y: float) -> float:
-        x_diff = point1_x - point2_x
-        y_diff = point1_y - point2_y
+        self.target_dist_diff = smallest_diff_val
 
-        return sqrt(x_diff ** 2 + y_diff ** 2)
+        # Convert local to global coords
+        local_x = self.local_viable_waypoints["x"].iloc[smallest_diff_ind]
+        local_y = self.local_viable_waypoints["y"].iloc[smallest_diff_ind]
 
-    def calc_drive_angle(self, pose: Pose, target_waypoint: int) -> float:
-        # arc = (2|y|) / L^2
-        # y = Current pos `y` to waypoint pos `y`
-        # L = Lookahead
+        global_x, global_y = self.local_to_global_coords(local_x, local_y)
 
-        waypoint_y = self.viable_waypoints["y"].iloc[target_waypoint]
-        d_y = pose.position.y - waypoint_y
+        # Set local positioning variables
+        self.local_tar_x = local_x
+        self.local_tar_y = local_y
+        self.global_tar_x = global_x
+        self.global_tar_y = global_y
 
-        return 2 * abs(d_y) / self.lookahead ** 2
+        rospy.loginfo(f"TargetLocal: {local_x}, {local_y}")
+        rospy.loginfo(f"TargetGlobal: {global_x}, {global_y}")
 
-    def publish_drive_msg(self, angle: float):
-        # Get the final steering angle and speed value
+        if self.target_dist_diff is float("inf"):
+            rospy.logerr("No Viable Targets")
+            exit()
+
+        rospy.loginfo("Viable waypoints /\\")
+        rospy.loginfo(self.local_viable_waypoints)
+
+    def distance_to_point(self, x: float, y: float) -> float:
+        """
+            Calculates the distance to the given point assuming all coordinates are local
+            All returned values will be positive
+            Returns sqrt(x ** 2 + y ** 2)
+        """
+        return sqrt(x ** 2 + y ** 2)
+
+    def calc_drive_angle(self) -> float:
+        """
+            Calculates the desired drive angle of the car in order to reach the waypoint
+
+            Returns: The angle (In radians)
+        """
+
+        """
+        Paper used:
+        https://www.ri.cmu.edu/pub_files/pub3/coulter_r_craig_1992_1/coulter_r_craig_1992_1.pdf
+
+        Curvature = 2x / L^2
+        Where:
+            x = Distance between target's x coords and cars (Car's coord is 0,0 as local coords)
+            L = Lookahead distance of the car to find waypoints
+                OPTIONAL: Replaced with distance between car and point to increase accuracy
+        """
+
+        waypoint_x = self.local_tar_x
+        waypoint_y = self.local_tar_y
+
+        # lookahead can be replaced with (target_dist_diff + lookahead) as lookahead will not be exactly equal to the
+        # actual distance "L"
+        distance = self.distance_to_point(waypoint_x, waypoint_y)
+        distance = self.lookahead_dist
+
+        if distance == 0 or waypoint_x == 0:
+            return 0
+
+        curvature = 2 * waypoint_x / distance ** 2
+
+        """"
+            Quoting the paper:
+            "The curvature is transformed into steering wheel angle by the vehicle’s on board controller."
+            
+            The angle is proportional to the curvature and the wheelbase (Because of ackerman steering)
+        """
+        angle = radians(curvature * self.WHEELBASE * self.STEERING_ANGLE_CONSTANT)
+
+        rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
+        rospy.loginfo(
+            f"Aiming for ({round(waypoint_x, 2)}, {round(waypoint_y, 2)}) (Gl: {round(self.global_tar_x, 2)},"
+            f"{round(self.global_tar_y, 2)}) at {round(degrees(angle), 2)}deg (+{round(self.target_dist_diff, 3)}m from"
+            f" {self.lookahead_dist}) ({round(distance, 4)}m away)")
+        return angle
+
+    def publish_drive_msg(self, angle: float) -> None:
+        """
+            Publish the final steering angle and speed to self.DRIVE_TOPIC
+            Speed is determined by:
+                self.STRAIGHTS_STEERING_ANGLE
+                self.CORNERS_SPEED
+                self.STRAIGHTS_SPEED
+        """
+
         if abs(angle) > self.STRAIGHTS_STEERING_ANGLE:
             speed = self.CORNERS_SPEED
         else:
@@ -408,13 +568,83 @@ class PurePursuit:
         drive_msg.drive.steering_angle = angle
         drive_msg.drive.speed = speed
 
-        rospy.loginfo(f"Angle {degrees(drive_msg.drive.steering_angle)}")
         self.drive_publisher.publish(drive_msg)
 
+    def global_to_local_coords(self, tar_x: float, tar_y: float) -> (float, float):
+        # https://gamedev.stackexchange.com/a/109377
+        # Checked this answer and think is correct
 
-def main(args: List[str]):
+        x = tar_x - self.global_curr_x
+        y = tar_y - self.global_curr_y
+
+        theta = self.global_curr_angle
+
+        loc_x = x * cos(theta) + y * sin(theta)
+        loc_y = -x * sin(theta) + y * cos(theta)
+
+        # TODO remove test (Line below)
+        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(theta), 2)}) {tar_x}, {tar_y} == {self.local_to_global_coords(loc_x, loc_y)}?")
+
+        return loc_x, loc_y
+
+    def local_to_global_coords(self, x: float, y: float) -> (float, float):
+        # https://gamedev.stackexchange.com/a/109377
+        # Checked this answer and think is correct
+
+        theta = self.global_curr_angle
+
+        global_x = x * cos(theta) - y * sin(theta) + self.global_curr_x
+        global_y = x * sin(theta) + y * cos(theta) + self.global_curr_y
+
+        return global_x, global_y
+
+
+def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_waypoint: int = 1) -> None:
+    """
+        Teleport car to initial position/orientation
+        Orientation is the angle between the first and second waypoints
+
+        The car will be in the position of the initial waypoint and facing the second
+    """
+    initialpose_publisher = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=1)
+
+    message = PoseWithCovarianceStamped()
+    message.header.stamp = rospy.Time.now()
+    message.header.frame_id = "map"
+
+    message.pose.pose.position.x = waypoints.iloc[init_waypoint]["x"]
+    message.pose.pose.position.y = waypoints.iloc[init_waypoint]["y"]
+    d_x = abs(message.pose.pose.position.x - waypoints.iloc[target_waypoint]["x"])
+    d_y = abs(message.pose.pose.position.y - waypoints.iloc[target_waypoint]["y"])
+
+    # https://automaticaddison.com/how-to-convert-euler-angles-to-quaternions-using-python/
+    # https://answers.ros.org/question/181689/computing-posewithcovariances-6x6-matrix/
+    roll = 0
+    pitch = 0
+    yaw = -atan(d_y / d_x)
+
+    q = quaternion_from_euler(roll, pitch, yaw)
+    message.pose.pose.orientation = Quaternion(*q)
+
+    # Taken from the messages F1TenthSimulator sends when using "2D pose estimate"
+    message.pose.covariance = [0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                               0.0, 0.0, 0.06853892326654787]
+
+    # Check f1tenth subscriber is active
+    while initialpose_publisher.get_num_connections() < 1:  # Set to 2 if using `rostopic echo /initialpose`
+        time.sleep(0.05)
+
+    rospy.loginfo(f"Moving car to:\n{message}")
+    initialpose_publisher.publish(message)
+
+
+def main(args: List[str]) -> None:
+    # https://vinesmsuic.github.io/2020/09/29/robotics-purepersuit/#importance-of-visualizations
+    # Interesting way to smooth waypoints
+
     rospy.init_node("pure_pursuit", anonymous=True)
-    time.sleep(1)
+
     # Load raceline (The path to follow on this map)
     map_uri = args[1]
 
@@ -422,11 +652,12 @@ def main(args: List[str]):
     # raceline_uri = map_uri.replace("map.yaml", "DonkeySim_waypoints.txt")
 
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
-    # waypoints = pd.DataFrame(np.genfromtxt(raceline_uri, delimiter=",", dtype=float, names=True))
     waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
     waypoints.rename(columns={"# x_m": "x", " y_m": "y"}, inplace=True)
 
-    _ = PurePursuit(waypoints)
+    initialise_car_pos(waypoints)
+
+    PurePursuit(waypoints)
 
     rospy.spin()
 
