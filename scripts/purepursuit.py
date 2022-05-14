@@ -329,9 +329,7 @@ class PurePursuit:
         self.global_waypoints = waypoints
         self.lookahead_dist = lookahead
 
-        time.sleep(2)
-
-        self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=10)
+        self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=1)
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
 
     def pose_callback(self, pose_stamped: PoseStamped):
@@ -339,6 +337,7 @@ class PurePursuit:
         self.pose_current = pose_stamped.pose
         self.header = pose_stamped.header
 
+        rospy.loginfo(f"Current pos: {pose_stamped.pose}")
         self.global_curr_x = self.pose_current.position.x
         self.global_curr_y = self.pose_current.position.y
 
@@ -352,7 +351,7 @@ class PurePursuit:
         rot = Rotation.from_quat(quat)
         self.global_curr_angle = rot.as_euler('xyz', degrees=False)[2]
 
-        rospy.loginfo(f"Angle: {round(degrees(self.global_curr_angle), 2)}")
+        rospy.loginfo(f"Angle of car: {round(degrees(self.global_curr_angle), 2)}")
 
         # If it has either reached target or isn't moving (eg Planner was turned off) then calculate new target to go to
         if self.is_first_move() or self.is_not_moving() or self.has_reached_target():
@@ -366,9 +365,9 @@ class PurePursuit:
             self.publish_drive_msg(angle)
         else:
             rospy.loginfo(
-                f"Not reached target ({round(self.global_tar_x, 2)}, {round(self.global_tar_y, 2)}). Current:"
-                f"({round(self.pose_current.position.x, 2)}, {round(self.pose_current.position.y, 2)}) (Previous"
-                f"({round(self.pose_previous.position.x, 2)}, {round(self.pose_previous.position.y, 2)})")
+                f"Not reached target ({round(self.global_tar_x, 2)}, {round(self.global_tar_y, 2)}). "
+                f"Current: ({round(self.pose_current.position.x, 2)}, {round(self.pose_current.position.y, 2)}) "
+                f"(Previous ({round(self.pose_previous.position.x, 2)}, {round(self.pose_previous.position.y, 2)})")
 
         self.pose_previous = self.pose_current
 
@@ -381,11 +380,12 @@ class PurePursuit:
             return True
         return False
 
-    def is_not_moving(self) -> bool:
+    def is_not_moving(self, error: float = 0.05) -> bool:
         """
-            Returns true if current pos is different to last pos
+            Returns true if current pos is different than last pos
         """
-        if self.pose_current.position.x == self.pose_previous.position.x and self.pose_current.position.y == self.pose_previous.position.y:
+
+        if self.float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y, self.pose_previous.position.y, error=error):
             rospy.loginfo(f"NotMoving")
             return True
         return False
@@ -395,14 +395,8 @@ class PurePursuit:
             Returns True if car's current x AND y coords are within error of target coords
         """
 
-        t_x = self.global_tar_x
-        t_y = self.global_tar_y
-
-        x = self.global_curr_x
-        y = self.global_curr_y
-
-        if t_x - error <= x <= t_x + error and t_y - error <= y <= t_y + error:
-            rospy.loginfo("")
+        if self.float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y, error=error):
+            rospy.loginfo("HasReachedTarget")
             return True
         return False
 
@@ -503,8 +497,8 @@ class PurePursuit:
         self.global_tar_x = global_x
         self.global_tar_y = global_y
 
-        rospy.loginfo(f"TargetLocal: {local_x}, {local_y}")
-        rospy.loginfo(f"TargetGlobal: {global_x}, {global_y}")
+        # rospy.loginfo(f"TargetLocal: {local_x}, {local_y}")
+        # rospy.loginfo(f"TargetGlobal: {global_x}, {global_y}")
 
         if self.target_dist_diff is float("inf"):
             rospy.logerr("No Viable Targets")
@@ -618,6 +612,17 @@ class PurePursuit:
 
         return global_x, global_y
 
+    def float_equal(self, val1: float, val2: float, error: float = 0.05) -> bool:
+        """
+            Returns True if val1 and val2 are within error
+        """
+        return val1 - error <= val2 <= val1 + error
+
+    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, error: float = 0.05) -> bool:
+        """
+            Returns True if x1 and x2 are the within error AND y1 and y2 are within error
+        """
+        return self.float_equal(x1, x2, error=error) and self.float_equal(y1, y2, error=error)
 
 def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_waypoint: int = 1) -> None:
     """
