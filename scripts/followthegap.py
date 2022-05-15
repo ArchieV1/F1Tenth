@@ -83,6 +83,7 @@ class FollowTheGap:
         """
         lidar_angle = (range_index - (range_len / 2)) * self.radians_per_elem
         steering_angle = lidar_angle / 2
+        # rospy.loginfo_throttle(1, f"Angle: {steering_angle}")
         return steering_angle
 
     def process_lidar(self, ranges) -> None:

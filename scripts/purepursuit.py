@@ -286,8 +286,8 @@ class PurePursuit:
     MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
     MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
 
-    STRAIGHTS_SPEED = 5.0 / 5
-    CORNERS_SPEED = 3.0 / 5
+    STRAIGHTS_SPEED = 5.0 / 100
+    CORNERS_SPEED = 3.0 / 100
     STRAIGHTS_STEERING_ANGLE = radians(10)
     STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
@@ -295,6 +295,7 @@ class PurePursuit:
     """Constant from car size"""
 
     target_dist_diff = None
+    """Distance of target from self.LOOKAHEAD"""
 
     local_viable_waypoints = None
     """Waypoints that are ahead of the car and within reasonable MAX_WAYPOINT_LOOKAHEAD > X > MIN_WAYPOINT_LOOKAHEAD"""
@@ -393,7 +394,8 @@ class PurePursuit:
             Use a tight error tolerance as the car's position updates often
         """
 
-        if self.float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y, self.pose_previous.position.y, error=error):
+        if self.float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y,
+                                   self.pose_previous.position.y, error=error):
             # rospy.loginfo(f"NotMoving")
             return True
         return False
@@ -403,7 +405,8 @@ class PurePursuit:
             Returns True if car's current x AND y coords are within error of target coords
         """
 
-        if self.float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y, error=error):
+        if self.float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y,
+                                   error=error):
             # rospy.loginfo("HasReachedTarget")
             return True
         return False
@@ -427,19 +430,19 @@ class PurePursuit:
         # Convert global coords to local coords (of the car)
         # Then filter out unviable ones (Eg behind car)
         # Then find best one
-        smallest_diff_val = float("inf")
+        self.target_dist_diff = float("inf")
 
         for i, row in self.global_waypoints.iterrows():
             local_x, local_y = self.global_to_local_coords(row[0], row[1])
 
             # Anywhere in front just not underneath (Using local coords)
             if local_y > 0 or (local_y >= 0 and local_x != 0):
-                dist_from_car = self.distance_to_point(row[0], row[1])
+                dist_from_car = self.distance_to_point(local_x, local_y)
                 diff_dist_lookahead = dist_from_car - self.lookahead_dist
 
                 # If better than previous (Closer to lookahead)
-                if abs(diff_dist_lookahead) < abs(smallest_diff_val):
-                    smallest_diff_val = diff_dist_lookahead
+                if abs(diff_dist_lookahead) < abs(self.target_dist_diff):
+                    self.target_dist_diff = diff_dist_lookahead
 
                     self.global_tar_x = row[0]
                     self.global_tar_y = row[1]
@@ -493,9 +496,10 @@ class PurePursuit:
                          f"This should not happen")
             return 0
 
-        curvature = 2 * waypoint_x / distance ** 2
-        # curvature = 2 * waypoint_y / distance ** 2
+        curvature = 2 * waypoint_x / distance ** 2  # Curvature with +y in straight line and x left and right
+        curvature = 2 * waypoint_y / distance ** 2
 
+        radius = 1 / curvature
         """"
             Quoting the paper:
             "The curvature is transformed into steering wheel angle by the vehicle’s on board controller."
@@ -529,25 +533,101 @@ class PurePursuit:
         angle = radians((self.WHEELBASE / curvature) * self.STEERING_ANGLE_CONSTANT)
 
         # Translate from 0 -> +360 to -180 -> +180 (As that's what car takes)
-        to_angle = (self.WHEELBASE * curvature)
+        self.WHEELBASE = 1
+        self.STEERING_ANGLE_CONSTANT = 1
+        to_angle = (self.WHEELBASE * curvature * self.STEERING_ANGLE_CONSTANT)
+
+        # # Rate of change of curvature gives m of tangent y=mx + c which gives angle
+        # rate_curvature = 2 * (waypoint_x ** 2 - waypoint_y ** 2)/((waypoint_x ** 2 + waypoint_y ** 2) ** 2)  # angle rel +x
+        # rate_curvature = 4 * (waypoint_x * waypoint_y) / ((waypoint_x ** 2 + waypoint_y ** 2) ** 2)  # angle rel +y
+        """
+            y = mx
+            m = y/x
+            1/m = x/y
+            theta = atan(opp/adj) = atan(x/y)
+            => theta = atan(1/m)
+        """
+        to_angle = degrees(atan(curvature))
+
         if to_angle >= 180:
-            to_angle -= 360
+            to_angle = 360 - to_angle
+        else:
+            to_angle *= -1
 
         # If x is on the right hand side of the car turn right. Otherwise turn left
         # +x coord is left side of car
-        # +angle is steer left
-        if waypoint_x > 0:
-            to_angle = -to_angle
+        # -angle is steer left
+        # if waypoint_x > 0:
+        #     to_angle = to_angle
 
         angle = radians(to_angle)
-
+        angle = np.arctan(self.WHEELBASE / radius)
         # angle = radians(atan2(self.local_tar_x, self.local_tar_y))  # Straight line instead of curve
 
+        # region From github
+        # TODO delete From https://github.com/f1tenth-dev/pure_pursuit/blob/master/scripts/vehicle_controller.py
+        WHEELBASE_LEN = self.WHEELBASE
+        ang_goal_x = self.global_tar_x
+        ang_goal_y = self.global_tar_y
+
+        curr_x = self.global_curr_x
+        curr_y = self.global_curr_y
+        heading = self.global_curr_angle
+
+        GOAL_RIGHT = "goal_to_right"
+        GOAL_LEFT = "goal_to_left"
+        GOAL_ON_LINE = "goal_on_line"
+
+        MSG_A = "goal at {}m"
+        MSG_B = "goal at {}m bearing {} {}"
+        MSG_GOAL = "recieved new goal: ({}, {})"
+
+        ANGLE_RANGE_A = 45.0  # 60.0
+        ANGLE_RANGE_B = 30.0
+        ANGLE_RANGE_C = 15.0
+        ANGLE_RANGE_D = 5.0
+
+        eucl_d = sqrt(pow(ang_goal_x - curr_x, 2) + pow(ang_goal_y - curr_y, 2))
+        curvature = degrees(2.0 * (abs(ang_goal_x) - abs(curr_x)) / (pow(eucl_d, 2)))
+        steering_angle = atan(curvature * WHEELBASE_LEN)
+        theta = atan2(ang_goal_y - curr_y, ang_goal_x - curr_x)
+
+        proj_x = eucl_d * cos(heading) + curr_x
+        proj_y = eucl_d * sin(heading) + curr_y
+
+        proj_eucl_shift = sqrt(pow(proj_x - ang_goal_x, 2) + pow(proj_y - ang_goal_y, 2))
+
+        angle_error = acos(1 - (pow(proj_eucl_shift, 2) / (2 * pow(eucl_d, 2))))
+        angle_error = degrees(angle_error)
+
+        goal_sector = (ang_goal_x - curr_x) * (proj_y - curr_y) - (ang_goal_y - curr_y) * (proj_x - curr_x)
+
+        if goal_sector > 0:
+            goal_sector = GOAL_RIGHT
+        elif goal_sector < 0:
+            goal_sector = GOAL_LEFT
+        else:
+            goal_sector = GOAL_ON_LINE
+
+        if goal_sector == GOAL_ON_LINE:
+            msg = MSG_A.format(round(eucl_d, 2))
+        else:
+            msg = MSG_B.format(round(eucl_d, 2), round(angle_error, 2), goal_sector)
+
+        if angle_error > ANGLE_RANGE_A:
+            angle_error = ANGLE_RANGE_A
+        steering_angle = angle_error / ANGLE_RANGE_A
+
+        if goal_sector == GOAL_RIGHT:
+            steering_angle = -1.0 * steering_angle
+        angle = steering_angle
+        # endregion
+
         # rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
-        # rospy.loginfo(
-        #     f"Aiming for ({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) (Gl: {round(self.global_tar_x, 3)},"
-        #     f"{round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg (+{round(self.target_dist_diff, 4)}m from"
-        #     f" {self.lookahead_dist}) ({round(distance, 4)}m away)")
+        rospy.loginfo_throttle(2,
+                               f"Aiming for L({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) "
+                               f"Gl({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg "
+                               f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away)")
         return angle
 
     def publish_drive_msg(self, angle: float) -> None:
@@ -605,7 +685,8 @@ class PurePursuit:
         """
         return val1 - error <= val2 <= val1 + error
 
-    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, alt_inputs: bool = False, error: float = 0.05) -> bool:
+    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, alt_inputs: bool = False,
+                           error: float = 0.05) -> bool:
         """
             Returns True if x1 and x2 are the within error AND y1 and y2 are within error
             If alt_inputs is true compares x1/y1 and x2/y2 instead
