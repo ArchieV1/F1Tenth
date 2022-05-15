@@ -281,13 +281,13 @@ class PurePursuit:
     POSE_TOPIC = "/gt_pose"
     DRIVE_TOPIC = "/pp_drive"
 
-    LOOKAHEAD_DEFAULT = 7
+    LOOKAHEAD_DEFAULT = 4
     __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
     MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
     MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
 
-    STRAIGHTS_SPEED = 5.0 / 10
-    CORNERS_SPEED = 3.0 / 10
+    STRAIGHTS_SPEED = 5.0 / 5
+    CORNERS_SPEED = 3.0 / 5
     STRAIGHTS_STEERING_ANGLE = radians(10)
     STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
@@ -321,6 +321,11 @@ class PurePursuit:
         Angle relative to the +X axis going towards +Y (Anti clockwise)
         Between 0 and 360 NOT -180 and +180
     """
+    # To speed up global_to_local
+    # Both equal to -current_angle
+    cos_theta = None
+    sin_theta = None
+
     # Local current everything will always be `0`
 
     # Current target global and local
@@ -337,7 +342,7 @@ class PurePursuit:
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
 
     def pose_callback(self, pose_stamped: PoseStamped):
-        rospy.loginfo("==========PP POSE_CALLBACK==========")
+        # rospy.loginfo("==========PP POSE_CALLBACK==========")
         self.pose_current = pose_stamped.pose
         self.header = pose_stamped.header
 
@@ -357,24 +362,18 @@ class PurePursuit:
         if self.global_curr_angle < 0:
             self.global_curr_angle += radians(360)  # Translate from -180 -> +180 to 0 -> 360
 
-        rospy.loginfo(f"Angle of car: {round(degrees(self.global_curr_angle), 2)}")
+        # Caching for global_to_local and local_to_global
+        self.cos_theta = cos(-self.global_curr_angle)
+        self.sin_theta = cos(-self.global_curr_angle)
 
-        # If it has either reached target or isn't moving (eg Planner was turned off) then calculate new target to go to
-        if self.is_first_move() or self.is_not_moving() or self.has_reached_target():
-            # Generate df of waypoints to be used
-            self.calc_viable_waypoints()
-            rospy.loginfo(f"Viable: {len(self.local_viable_waypoints)}")
+        # rospy.loginfo(f"Angle of car: {round(degrees(self.global_curr_angle), 2)}")
 
-            self.find_target()
+        # Find taget and assing target values
+        self.calc_target_waypoint()
+        # rospy.loginfo(f"Viable: {len(self.local_viable_waypoints)}")
 
-            angle = self.calc_drive_angle()
-            self.publish_drive_msg(angle)
-        else:
-            rospy.loginfo(
-                f"Not reached target G({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) "
-                f"L({round(self.local_tar_x, 3)}, {round(self.local_tar_y, 3)}). "
-                f"Current: G({round(self.pose_current.position.x, 3)}, {round(self.pose_current.position.y, 3)}) "
-                f"(Previous G({round(self.pose_previous.position.x, 3)}, {round(self.pose_previous.position.y, 3)})")
+        angle = self.calc_drive_angle()
+        self.publish_drive_msg(angle)
 
         self.pose_previous = self.pose_current
 
@@ -383,11 +382,11 @@ class PurePursuit:
             Returns true is no previous pose or if no target
         """
         if self.pose_previous is None or self.global_tar_x is None or self.global_tar_y is None:
-            rospy.loginfo(f"FirstMove")
+            # rospy.loginfo(f"FirstMove")
             return True
         return False
 
-    def is_not_moving(self, error: float = 0.0003) -> bool:
+    def is_not_moving(self, error: float = 0.00003) -> bool:
         """
             Returns true if current pos is different than last pos
 
@@ -395,7 +394,7 @@ class PurePursuit:
         """
 
         if self.float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y, self.pose_previous.position.y, error=error):
-            rospy.loginfo(f"NotMoving")
+            # rospy.loginfo(f"NotMoving")
             return True
         return False
 
@@ -405,117 +404,54 @@ class PurePursuit:
         """
 
         if self.float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y, error=error):
-            rospy.loginfo("HasReachedTarget")
+            # rospy.loginfo("HasReachedTarget")
             return True
         return False
 
-    def calc_viable_waypoints(self) -> None:
+    def calc_target_waypoint(self) -> None:
         """
-            Calculates dataframe of viable waypoints
-            Assigns self.viable_waypoints
+            Calculates target waypoint from self.waypoints
+            Assigns:
+                self.global_tar_x
+                self.global_tar_y
+                self.local_tar_x
+                self.local_tar_y
 
             Viable waypoints are:
-                Within +-VIABLE_WAYPOINT_ANGLE rad of the direction of the car
+                ##Within +-VIABLE_WAYPOINT_ANGLE rad of the direction of the car
                 In front of the car
-                Greater than MIN_WAYPOINT_DISTANCE away
-                Less than MAX_WAYPOINT_DISTANCE way
+                ##Greater than MIN_WAYPOINT_DISTANCE away
+                ##Less than MAX_WAYPOINT_DISTANCE way
         """
 
         # Convert global coords to local coords (of the car)
-        columns = ["x", "y"]
-        local_waypoints = pd.DataFrame(columns=columns)
+        # Then filter out unviable ones (Eg behind car)
+        # Then find best one
+        smallest_diff_val = float("inf")
+
         for i, row in self.global_waypoints.iterrows():
-            x, y = self.global_to_local_coords(row[0], row[1])
+            local_x, local_y = self.global_to_local_coords(row[0], row[1])
 
-            df = pd.DataFrame([[x, y]], columns=columns)
-            local_waypoints = pd.concat([local_waypoints, df])
+            # Anywhere in front just not underneath (Using local coords)
+            if local_y > 0 or (local_y >= 0 and local_x != 0):
+                dist_from_car = self.distance_to_point(row[0], row[1])
+                diff_dist_lookahead = dist_from_car - self.lookahead_dist
 
-        local_waypoints.reset_index(drop=True, inplace=True)
+                # If better than previous (Closer to lookahead)
+                if abs(diff_dist_lookahead) < abs(smallest_diff_val):
+                    smallest_diff_val = diff_dist_lookahead
 
-        # Get all values in front of the car
+                    self.global_tar_x = row[0]
+                    self.global_tar_y = row[1]
 
-        # Angle created by the x/y of the coords greater than wanted angle
-        # |arctan(y/x)| > theta
-        # Constraints:
-        # x != 0  # Will break the division
-        # y >= 0
+                    self.local_tar_x = local_x
+                    self.local_tar_y = local_y
 
-        waypoints = pd.DataFrame(columns=columns)
-        for i, row in local_waypoints.iterrows():
-            x = row[0]
-            y = row[1]
-
-            # # rospy.loginfo(f"({x}, {y})")
-            # if y != 0 and x != 0:  # Not underneath car
-            #     if y >= 0:  # In front of car
-            #         # rospy.loginfo(f"{y} >= 0")
-            #         if x == 0 or atan(y / x) > self.VIABLE_WAYPOINT_ANGLE:  # Within the viable angle
-            #             # rospy.loginfo(f"{x} == 0 OR greater than angle")
-            #             distance_from_car = self.distance_to_point(x, y)
-            #             if True:  # self.MAX_WAYPOINT_DISTANCE > distance_from_car > self.MIN_WAYPOINT_DISTANCE:
-            #                 # rospy.loginfo(f"{distance_from_car} within range {self.MIN_WAYPOINT_DISTANCE} - {self.MAX_WAYPOINT_DISTANCE}")
-            #                 df = pd.DataFrame([[x, y]], columns=columns)
-            #                 waypoints = pd.concat([waypoints, df])
-
-            # If in front of car
-            # if (x == 0 and y > 0) or (y > 0 and abs(atan(y / x)) > self.VIABLE_WAYPOINT_ANGLE):
-            if y > 0:
-                df = pd.DataFrame([[x, y]], columns=columns)
-                waypoints = pd.concat([waypoints, df])
-
-        waypoints.reset_index(drop=True, inplace=True)  # Stop every index being "0"
-
-        self.local_viable_waypoints = waypoints
-
-        if len(self.local_viable_waypoints) == 0:
+        if self.local_tar_x is None:
             rospy.logerr(f"No Viable Waypoints\n"
                          f"Global Waypoints: {self.global_waypoints}\n\n"
-                         f"Local Waypoints: {local_waypoints}\n\n"
                          f"Viable Waypoints: {self.local_viable_waypoints}")
             exit()
-
-    def find_target(self) -> None:
-        """
-            Find the nearest waypoint to LOOKAHEAD
-            Sets:
-                self.target_dist_diff to the signed difference of the distance of the target from the car to LOOKAHEAD
-                self.target_ind to the index of the target waypoint in self.viable_waypoints
-        """
-
-        smallest_diff_val = float("inf")
-        smallest_diff_ind = 0
-
-        for i, row in self.local_viable_waypoints.iterrows():
-            dist_from_car = self.distance_to_point(row[0], row[1])
-            diff_dist_lookahead = dist_from_car - self.lookahead_dist
-
-            if abs(diff_dist_lookahead) < abs(smallest_diff_val):
-                smallest_diff_ind = i
-                smallest_diff_val = diff_dist_lookahead
-
-        self.target_dist_diff = smallest_diff_val
-
-        # Convert local to global coords
-        local_x = self.local_viable_waypoints["x"].iloc[smallest_diff_ind]
-        local_y = self.local_viable_waypoints["y"].iloc[smallest_diff_ind]
-
-        global_x, global_y = self.local_to_global_coords(local_x, local_y)
-
-        # Set local positioning variables
-        self.local_tar_x = local_x
-        self.local_tar_y = local_y
-        self.global_tar_x = global_x
-        self.global_tar_y = global_y
-
-        # rospy.loginfo(f"TargetLocal: {local_x}, {local_y}")
-        # rospy.loginfo(f"TargetGlobal: {global_x}, {global_y}")
-
-        if self.target_dist_diff is float("inf"):
-            rospy.logerr("No Viable Targets")
-            exit()
-
-        rospy.loginfo("Viable waypoints /\\")
-        rospy.loginfo(self.local_viable_waypoints)
 
     def distance_to_point(self, x: float, y: float) -> float:
         """
@@ -529,7 +465,7 @@ class PurePursuit:
         """
             Calculates the desired drive angle of the car in order to reach the waypoint
 
-            Returns: The angle (In radians)
+            Returns: The angle in radians. In range [-pi, +pi)
         """
 
         """
@@ -537,6 +473,7 @@ class PurePursuit:
         https://www.ri.cmu.edu/pub_files/pub3/coulter_r_craig_1992_1/coulter_r_craig_1992_1.pdf
 
         Curvature = 2x / L^2
+        => 2x / (x^2 + y^2)
         Where:
             x = Distance between target's x coords and cars (Car's coord is 0,0 as local coords)
             L = Lookahead distance of the car to find waypoints
@@ -552,9 +489,12 @@ class PurePursuit:
         # distance = self.lookahead_dist
 
         if distance == 0 or waypoint_x == 0:
+            rospy.logerr(f"Distance to target waypoints is 0. This means target waypoint is beneath car. "
+                         f"This should not happen")
             return 0
 
         curvature = 2 * waypoint_x / distance ** 2
+        # curvature = 2 * waypoint_y / distance ** 2
 
         """"
             Quoting the paper:
@@ -585,16 +525,29 @@ class PurePursuit:
         self.STEERING_ANGLE_CONSTANT = 0.85  # y not low enough
         self.STEERING_ANGLE_CONSTANT = 1  #
         self.STEERING_ANGLE_CONSTANT = 2
-        self.STEERING_ANGLE_CONSTANT = 0.55 # y doesnt get small enough
+        self.STEERING_ANGLE_CONSTANT = 0.55  # y doesnt get small enough
         angle = radians((self.WHEELBASE / curvature) * self.STEERING_ANGLE_CONSTANT)
 
-        angle = radians(self.WHEELBASE * curvature)
+        # Translate from 0 -> +360 to -180 -> +180 (As that's what car takes)
+        to_angle = (self.WHEELBASE * curvature)
+        if to_angle >= 180:
+            to_angle -= 360
 
-        rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
-        rospy.loginfo(
-            f"Aiming for ({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) (Gl: {round(self.global_tar_x, 3)},"
-            f"{round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg (+{round(self.target_dist_diff, 4)}m from"
-            f" {self.lookahead_dist}) ({round(distance, 4)}m away)")
+        # If x is on the right hand side of the car turn right. Otherwise turn left
+        # +x coord is left side of car
+        # +angle is steer left
+        if waypoint_x > 0:
+            to_angle = -to_angle
+
+        angle = radians(to_angle)
+
+        # angle = radians(atan2(self.local_tar_x, self.local_tar_y))  # Straight line instead of curve
+
+        # rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
+        # rospy.loginfo(
+        #     f"Aiming for ({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) (Gl: {round(self.global_tar_x, 3)},"
+        #     f"{round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg (+{round(self.target_dist_diff, 4)}m from"
+        #     f" {self.lookahead_dist}) ({round(distance, 4)}m away)")
         return angle
 
     def publish_drive_msg(self, angle: float) -> None:
@@ -627,13 +580,12 @@ class PurePursuit:
         x = tar_x - self.global_curr_x
         y = tar_y - self.global_curr_y
 
-        theta = degrees(self.global_curr_angle)
-
-        loc_x = x * cos(theta) + y * sin(theta)
-        loc_y = -x * sin(theta) + y * cos(theta)
+        # Uses constants calculated in pose_callback to speed up calculations
+        loc_x = x * self.cos_theta + y * self.sin_theta
+        loc_y = -x * self.cos_theta + y * self.sin_theta
 
         # TODO remove test (Line below)
-        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(theta), 2)}) {tar_x}, {tar_y} == {self.local_to_global_coords(loc_x, loc_y)}?")
+        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(theta, 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
 
         return loc_x, loc_y
 
@@ -641,10 +593,9 @@ class PurePursuit:
         # https://gamedev.stackexchange.com/a/109377
         # Checked this answer and think is correct
 
-        theta = degrees(self.global_curr_angle)
-
-        global_x = x * cos(theta) - y * sin(theta) + self.global_curr_x
-        global_y = x * sin(theta) + y * cos(theta) + self.global_curr_y
+        # Uses constants calculated in pose_callback to speed up calculations
+        global_x = x * self.cos_theta - y * self.sin_theta + self.global_curr_x
+        global_y = x * self.sin_theta + y * self.cos_theta + self.global_curr_y
 
         return global_x, global_y
 
@@ -654,10 +605,13 @@ class PurePursuit:
         """
         return val1 - error <= val2 <= val1 + error
 
-    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, error: float = 0.05) -> bool:
+    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, alt_inputs: bool = False, error: float = 0.05) -> bool:
         """
             Returns True if x1 and x2 are the within error AND y1 and y2 are within error
+            If alt_inputs is true compares x1/y1 and x2/y2 instead
         """
+        if alt_inputs:
+            return self.float_equal(x1, y1, error=error) and self.float_equal(x2, y2, error=error)
         return self.float_equal(x1, x2, error=error) and self.float_equal(y1, y2, error=error)
 
 
@@ -698,7 +652,7 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
         time.sleep(0.05)
         rospy.loginfo("Waiting for subscribers before positioning car")
 
-    rospy.loginfo(f"Moving car to:\n{message}")
+    # rospy.loginfo(f"Moving car to:\n{message}")
     initialpose_publisher.publish(message)
 
 
