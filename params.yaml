@@ -58,7 +58,7 @@ nav_mux_idx: 4
 new_method_mux_idx: -1
 ftg_mux_idx: 5
 pp_mux_idx: 6
-scanm_mux_idx: 7
+wf_mux_idx: 7
 
 # Enables joystick if true
 joy: true
@@ -76,7 +76,7 @@ nav_button_idx: 5 # RB button
 new_button_idx: -1
 ftg_button_idx: 7
 pp_button_idx: 8
-scanm_button_idx: 9
+wf_button_idx: 9
 
 # Keyboard characters for toggling mux
 joy_key_char: "j"
@@ -89,7 +89,7 @@ nav_key_char: "n"
 new_key_char: "z"
 ftg_key_char: "f"
 pp_key_char: "p"
-scanm_key_char: "m"
+wf_key_char: "m"
 
 # Keyboard driving params
 keyboard_speed: 1.8  # meters/second
@@ -121,7 +121,7 @@ nav_drive_topic: "/nav"
 new_drive_topic: "/new_drive"
 ftg_drive_topic: "/ftg_drive"
 pp_drive_topic: "/pp_drive"
-scanm_drive_topic: "/scanm_drive"
+wf_drive_topic: "/wf_drive"
 
 # name of file to write collision log to 
 collision_file: "collision_file"

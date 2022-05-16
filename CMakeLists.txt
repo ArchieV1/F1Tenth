@@ -94,7 +94,7 @@ if(DEFINED CATKIN_DEVEL_PREFIX)
   catkin_install_python(PROGRAMS
     scripts/purepursuit.py
     scripts/followthegap.py
-    scripts/scanmatching.py
+    scripts/wallfollowing.py
     scripts/waypoint_logger.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )

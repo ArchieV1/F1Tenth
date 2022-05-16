@@ -42,7 +42,7 @@ private:
     // int new_mux_idx;
     int ftg_mux_idx;
     int pp_mux_idx;
-    int scanm_mux_idx;
+    int wf_mux_idx;
 
     // Mux controller array
     std::vector<bool> mux_controller;
@@ -58,7 +58,7 @@ private:
     // int new_button_idx;
     int ftg_button_idx;
     int pp_button_idx;
-    int scanm_button_idx;
+    int wf_button_idx;
 
     // Key indices
     std::string joy_key_char;
@@ -70,7 +70,7 @@ private:
     // int new_key_char;
     std::string ftg_key_char;
     std::string pp_key_char;
-    std::string scanm_key_char;
+    std::string wf_key_char;
 
     // Is ebrake on? (not engaged, but on)
     bool safety_on;
@@ -130,7 +130,7 @@ public:
         // n.getParam("new_mux_idx", new_mux_idx);
         n.getParam("ftg_mux_idx", ftg_mux_idx);
         n.getParam("pp_mux_idx", pp_mux_idx);
-        n.getParam("scanm_mux_idx", scanm_mux_idx);
+        n.getParam("wf_mux_idx", wf_mux_idx);
 
         // Get button indices
         n.getParam("joy_button_idx", joy_button_idx);
@@ -142,7 +142,7 @@ public:
         // n.getParam("new_button_idx", new_button_idx);
         n.getParam("ftg_button_idx", ftg_button_idx);
         n.getParam("pp_button_idx", pp_button_idx);
-        n.getParam("scanm_button_idx", scanm_button_idx);
+        n.getParam("wf_button_idx", wf_button_idx);
 
         // Get key indices
         n.getParam("joy_key_char", joy_key_char);
@@ -154,7 +154,7 @@ public:
         // n.getParam("new_key_char", new_key_char);
         n.getParam("ftg_key_char", ftg_key_char);
         n.getParam("pp_key_char", pp_key_char);
-        n.getParam("scanm_key_char", scanm_key_char);
+        n.getParam("wf_key_char", wf_key_char);
 
         // Initialize the mux controller 
         n.getParam("mux_size", mux_size);
@@ -343,9 +343,9 @@ public:
             // Pure pursuit
             toggle_mux(pp_mux_idx, "PP Planner");
         }
-        if (msg.buttons[scanm_button_idx]) {
+        if (msg.buttons[wf_button_idx]) {
             // Scan matching
-            toggle_mux(scanm_mux_idx, "Scan Match Planner");
+            toggle_mux(wf_mux_idx, "Scan Match Planner");
         }
     }
 
@@ -387,9 +387,9 @@ public:
            // Pure pursuit
            toggle_mux(pp_mux_idx, "PP Planner");
         }
-        if (msg.data == scanm_key_char) {
+        if (msg.data == wf_key_char) {
            // Scan matching
-           toggle_mux(scanm_mux_idx, "Scan Match Planner");
+           toggle_mux(wf_mux_idx, "Scan Match Planner");
         }
 
     }

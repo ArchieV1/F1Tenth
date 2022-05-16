@@ -86,13 +86,13 @@ class FollowTheGap:
         # rospy.loginfo_throttle(1, f"Angle: {steering_angle}")
         return steering_angle
 
-    def process_lidar(self, ranges) -> None:
+    def process_lidar(self, laser_scan: LaserScan) -> None:
         """
         This is the main function that is getting called from the simulation
         Process each LiDAR scan as per the Follow Gap algorithm & publish an AckermannDriveStamped Message
         """
         # Preprocess the Lidar Information
-        proc_ranges = self.preprocess_lidar(ranges.ranges)
+        proc_ranges = self.preprocess_lidar(laser_scan.ranges)
         # Find closest point to LiDAR
         closest = proc_ranges.argmin()
 

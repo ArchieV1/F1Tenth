@@ -144,12 +144,12 @@ public:
         n.getParam("pp_mux_idx", pp_mux_idx);
         add_channel(pp_drive_topic, drive_topic, pp_mux_idx);
 
-        // Scanm = Scan Match
-        int scanm_mux_idx;
-        std::string scanm_drive_topic;
-        n.getParam("scanm_drive_topic", scanm_drive_topic);
-        n.getParam("scanm_mux_idx", scanm_mux_idx);
-        add_channel(scanm_drive_topic, drive_topic, scanm_mux_idx);
+        // wf = Scan Match
+        int wf_mux_idx;
+        std::string wf_drive_topic;
+        n.getParam("wf_drive_topic", wf_drive_topic);
+        n.getParam("wf_mux_idx", wf_mux_idx);
+        add_channel(wf_drive_topic, drive_topic, wf_mux_idx);
     }
 
     void add_channel(std::string channel_name, std::string drive_topic, int mux_idx_) {

@@ -3,7 +3,7 @@ import rospy
 
 
 def main() -> None:
-    rospy.init_node("scanmatching", anonymous=True)
+    rospy.init_node("wallfollowing", anonymous=True)
     rospy.spin()
 
 
