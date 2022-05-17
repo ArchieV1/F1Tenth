@@ -337,15 +337,15 @@ public:
         // }
         if (msg.buttons[ftg_button_idx]) {
             // Follow the gap
-            toggle_mux(ftg_mux_idx, "FTG Planner");
+            toggle_mux(ftg_mux_idx, "FollowTheGap (FTG) Planner");
         }
         if (msg.buttons[pp_button_idx]) {
             // Pure pursuit
-            toggle_mux(pp_mux_idx, "PP Planner");
+            toggle_mux(pp_mux_idx, "PurePursuit (PP) Planner");
         }
         if (msg.buttons[wf_button_idx]) {
-            // Scan matching
-            toggle_mux(wf_mux_idx, "Scan Match Planner");
+            // Wall following
+            toggle_mux(wf_mux_idx, "WallFollowing (WF) Planner");
         }
     }
 

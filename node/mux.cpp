@@ -144,7 +144,7 @@ public:
         n.getParam("pp_mux_idx", pp_mux_idx);
         add_channel(pp_drive_topic, drive_topic, pp_mux_idx);
 
-        // wf = Scan Match
+        // wf = WallFollowing
         int wf_mux_idx;
         std::string wf_drive_topic;
         n.getParam("wf_drive_topic", wf_drive_topic);

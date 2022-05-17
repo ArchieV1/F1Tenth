@@ -89,7 +89,7 @@ nav_key_char: "n"
 new_key_char: "z"
 ftg_key_char: "f"
 pp_key_char: "p"
-wf_key_char: "m"
+wf_key_char: "g"
 
 # Keyboard driving params
 keyboard_speed: 1.8  # meters/second
