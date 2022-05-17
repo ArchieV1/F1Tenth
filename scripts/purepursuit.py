@@ -20,7 +20,7 @@ from numba import njit
 from pyglet.gl import GL_POINTS
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
-from tf.transformations import quaternion_from_euler
+from tf.transformations import quaternion_from_euler, euler_from_quaternion
 from scipy.spatial.transform import Rotation
 
 """
@@ -282,17 +282,18 @@ class PurePursuit:
     DRIVE_TOPIC = "/pp_drive"
 
     LOOKAHEAD_DEFAULT = 4
-    __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
-    MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
-    MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
+    # __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
+    # MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
+    # MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
 
-    STRAIGHTS_SPEED = 5.0 / 100
-    CORNERS_SPEED = 3.0 / 100
+    STRAIGHTS_SPEED = 5.0 / 10
+    CORNERS_SPEED = 3.0 / 10
     STRAIGHTS_STEERING_ANGLE = radians(10)
     STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
     WHEELBASE = 0.3302
     """Constant from car size"""
+    distance_from_rear_wheel_to_front_wheel = 0.5  # From pmusau17  # TODO not needed
 
     target_dist_diff = None
     """Distance of target from self.LOOKAHEAD"""
@@ -343,29 +344,25 @@ class PurePursuit:
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
 
     def pose_callback(self, pose_stamped: PoseStamped):
-        # rospy.loginfo("==========PP POSE_CALLBACK==========")
         self.pose_current = pose_stamped.pose
         self.header = pose_stamped.header
 
-        # rospy.loginfo(f"Current pos: {pose_stamped.pose}")
         self.global_curr_x = self.pose_current.position.x
         self.global_curr_y = self.pose_current.position.y
 
-        # self.global_curr_angle = (2 * np.pi) - (2 * acos(self.pose_current.orientation.w))
-        # self.global_curr_angle = 2 * acos(self.pose_current.orientation.w)
-
-        quat = [self.pose_current.orientation.x,
+        quat = (self.pose_current.orientation.x,
                 self.pose_current.orientation.y,
                 self.pose_current.orientation.z,
-                self.pose_current.orientation.w]
-        rot = Rotation.from_quat(quat)
-        self.global_curr_angle = rot.as_euler('xyz', degrees=False)[2]
+                self.pose_current.orientation.w)
+
+        euler = euler_from_quaternion(quat)
+        self.global_curr_angle = np.double(euler[2])  # From +X towards +Y
         if self.global_curr_angle < 0:
             self.global_curr_angle += radians(360)  # Translate from -180 -> +180 to 0 -> 360
 
         # Caching for global_to_local and local_to_global
-        self.cos_theta = cos(-self.global_curr_angle)
-        self.sin_theta = cos(-self.global_curr_angle)
+        self.cos_theta = cos(self.global_curr_angle)
+        self.sin_theta = sin(self.global_curr_angle)
 
         # rospy.loginfo(f"Angle of car: {round(degrees(self.global_curr_angle), 2)}")
 
@@ -434,6 +431,7 @@ class PurePursuit:
 
         for i, row in self.global_waypoints.iterrows():
             local_x, local_y = self.global_to_local_coords(row[0], row[1])
+            # rospy.loginfo(f"Localxy: {local_x, local_y}")
 
             # Anywhere in front just not underneath (Using local coords)
             if local_y > 0 or (local_y >= 0 and local_x != 0):
@@ -497,7 +495,7 @@ class PurePursuit:
             return 0
 
         curvature = 2 * waypoint_x / distance ** 2  # Curvature with +y in straight line and x left and right
-        curvature = 2 * waypoint_y / distance ** 2
+        # curvature = 2 * waypoint_y / distance ** 2
 
         radius = 1 / curvature
         """"
@@ -544,10 +542,11 @@ class PurePursuit:
             y = mx
             m = y/x
             1/m = x/y
-            theta = atan(opp/adj) = atan(x/y)
-            => theta = atan(1/m)
+            m = 2x / (x^2 + y^2)
+            atan(o/a) = atan (x/y)
+            atan(1/m) = atan((x^2 + y^2) / 2x)
         """
-        to_angle = degrees(atan(curvature))
+        to_angle = degrees(atan(self.WHEELBASE/curvature))
 
         if to_angle >= 180:
             to_angle = 360 - to_angle
@@ -560,71 +559,81 @@ class PurePursuit:
         # if waypoint_x > 0:
         #     to_angle = to_angle
 
-        angle = radians(to_angle)
-        angle = np.arctan(self.WHEELBASE / radius)
-        # angle = radians(atan2(self.local_tar_x, self.local_tar_y))  # Straight line instead of curve
+        # From Paulius
+        # https://github.com/pmusau17/Platooning-F1Tenth/blob/noetic-port/src/pure_pursuit/scripts/pure_pursuit_angle.py
+        angle = atan2(self.local_tar_y, self.local_tar_x)
+        # Straight line instead of curve though isn't it?
 
         # region From github
-        # TODO delete From https://github.com/f1tenth-dev/pure_pursuit/blob/master/scripts/vehicle_controller.py
-        WHEELBASE_LEN = self.WHEELBASE
-        ang_goal_x = self.global_tar_x
-        ang_goal_y = self.global_tar_y
-
-        curr_x = self.global_curr_x
-        curr_y = self.global_curr_y
-        heading = self.global_curr_angle
-
-        GOAL_RIGHT = "goal_to_right"
-        GOAL_LEFT = "goal_to_left"
-        GOAL_ON_LINE = "goal_on_line"
-
-        MSG_A = "goal at {}m"
-        MSG_B = "goal at {}m bearing {} {}"
-        MSG_GOAL = "recieved new goal: ({}, {})"
-
-        ANGLE_RANGE_A = 45.0  # 60.0
-        ANGLE_RANGE_B = 30.0
-        ANGLE_RANGE_C = 15.0
-        ANGLE_RANGE_D = 5.0
-
-        eucl_d = sqrt(pow(ang_goal_x - curr_x, 2) + pow(ang_goal_y - curr_y, 2))
-        curvature = degrees(2.0 * (abs(ang_goal_x) - abs(curr_x)) / (pow(eucl_d, 2)))
-        steering_angle = atan(curvature * WHEELBASE_LEN)
-        theta = atan2(ang_goal_y - curr_y, ang_goal_x - curr_x)
-
-        proj_x = eucl_d * cos(heading) + curr_x
-        proj_y = eucl_d * sin(heading) + curr_y
-
-        proj_eucl_shift = sqrt(pow(proj_x - ang_goal_x, 2) + pow(proj_y - ang_goal_y, 2))
-
-        angle_error = acos(1 - (pow(proj_eucl_shift, 2) / (2 * pow(eucl_d, 2))))
-        angle_error = degrees(angle_error)
-
-        goal_sector = (ang_goal_x - curr_x) * (proj_y - curr_y) - (ang_goal_y - curr_y) * (proj_x - curr_x)
-
-        if goal_sector > 0:
-            goal_sector = GOAL_RIGHT
-        elif goal_sector < 0:
-            goal_sector = GOAL_LEFT
-        else:
-            goal_sector = GOAL_ON_LINE
-
-        if goal_sector == GOAL_ON_LINE:
-            msg = MSG_A.format(round(eucl_d, 2))
-        else:
-            msg = MSG_B.format(round(eucl_d, 2), round(angle_error, 2), goal_sector)
-
-        if angle_error > ANGLE_RANGE_A:
-            angle_error = ANGLE_RANGE_A
-        steering_angle = angle_error / ANGLE_RANGE_A
-
-        if goal_sector == GOAL_RIGHT:
-            steering_angle = -1.0 * steering_angle
-        angle = steering_angle
+        # # TODO delete From https://github.com/f1tenth-dev/pure_pursuit/blob/master/scripts/vehicle_controller.py
+        # WHEELBASE_LEN = self.WHEELBASE
+        # ang_goal_x = self.global_tar_x
+        # ang_goal_y = self.global_tar_y
+        #
+        # curr_x = self.global_curr_x
+        # curr_y = self.global_curr_y
+        # heading = self.global_curr_angle
+        #
+        # GOAL_RIGHT = "goal_to_right"
+        # GOAL_LEFT = "goal_to_left"
+        # GOAL_ON_LINE = "goal_on_line"
+        #
+        # MSG_A = "goal at {}m"
+        # MSG_B = "goal at {}m bearing {} {}"
+        # MSG_GOAL = "recieved new goal: ({}, {})"
+        #
+        # ANGLE_RANGE_A = 45.0  # 60.0
+        # ANGLE_RANGE_B = 30.0
+        # ANGLE_RANGE_C = 15.0
+        # ANGLE_RANGE_D = 5.0
+        #
+        # eucl_d = sqrt(pow(ang_goal_x - curr_x, 2) + pow(ang_goal_y - curr_y, 2))
+        # curvature = degrees(2.0 * (abs(ang_goal_x) - abs(curr_x)) / (pow(eucl_d, 2)))
+        # steering_angle = atan(curvature * WHEELBASE_LEN)
+        # theta = atan2(ang_goal_y - curr_y, ang_goal_x - curr_x)
+        #
+        # proj_x = eucl_d * cos(heading) + curr_x
+        # proj_y = eucl_d * sin(heading) + curr_y
+        #
+        # proj_eucl_shift = sqrt(pow(proj_x - ang_goal_x, 2) + pow(proj_y - ang_goal_y, 2))
+        #
+        # angle_error = acos(1 - (pow(proj_eucl_shift, 2) / (2 * pow(eucl_d, 2))))
+        # angle_error = degrees(angle_error)
+        #
+        # goal_sector = (ang_goal_x - curr_x) * (proj_y - curr_y) - (ang_goal_y - curr_y) * (proj_x - curr_x)
+        #
+        # if goal_sector > 0:
+        #     goal_sector = GOAL_RIGHT
+        # elif goal_sector < 0:
+        #     goal_sector = GOAL_LEFT
+        # else:
+        #     goal_sector = GOAL_ON_LINE
+        #
+        # if goal_sector == GOAL_ON_LINE:
+        #     msg = MSG_A.format(round(eucl_d, 2))
+        # else:
+        #     msg = MSG_B.format(round(eucl_d, 2), round(angle_error, 2), goal_sector)
+        #
+        # if angle_error > ANGLE_RANGE_A:
+        #     angle_error = ANGLE_RANGE_A
+        # steering_angle = angle_error / ANGLE_RANGE_A
+        #
+        # if goal_sector == GOAL_RIGHT:
+        #     steering_angle = -1.0 * steering_angle
+        # angle = steering_angle
         # endregion
 
+        # #https://github.com/Nolancw98/F1Tenth/blob/main/slam_pure_pursuit
+        # kp = 0.5
+        # integral =
+        # error = curvature
+        # P = kp * error  # proportional component
+        # I = integral + ki * error * TIME_INCREMENT  # integral component
+        # D = kd * (error - prev_error) / TIME_INCREMENT  # derivative component
+        # angle = P + I + D  # angle output is sum of components
+
         # rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
-        rospy.loginfo_throttle(2,
+        rospy.loginfo_throttle(1,
                                f"Aiming for L({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) "
                                f"Gl({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg "
                                f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away)")
@@ -661,12 +670,14 @@ class PurePursuit:
         y = tar_y - self.global_curr_y
 
         # Uses constants calculated in pose_callback to speed up calculations
-        loc_x = x * self.cos_theta + y * self.sin_theta
-        loc_y = -x * self.cos_theta + y * self.sin_theta
+        loc_x = (x * self.cos_theta) + (y * self.sin_theta)
+        loc_y = (-x * self.sin_theta) + (y * self.cos_theta)
 
         # TODO remove test (Line below)
-        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(theta, 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
+        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(self.global_curr_angle), 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
+        # rospy.loginfo(f"Target: {tar_x, tar_y} -> Local:{loc_x, loc_y}; Angle {degrees(self.global_curr_angle)}; GlobalCurr: {self.global_curr_x, self.global_curr_y}; Cos/Sin: {self.cos_theta, self.sin_theta}")
 
+        # rospy.loginfo(f"G->Local({loc_x, loc_y})")
         return loc_x, loc_y
 
     def local_to_global_coords(self, x: float, y: float) -> (float, float):
@@ -674,8 +685,8 @@ class PurePursuit:
         # Checked this answer and think is correct
 
         # Uses constants calculated in pose_callback to speed up calculations
-        global_x = x * self.cos_theta - y * self.sin_theta + self.global_curr_x
-        global_y = x * self.sin_theta + y * self.cos_theta + self.global_curr_y
+        global_x = (x * self.cos_theta) - (y * self.sin_theta) + self.global_curr_x
+        global_y = (x * self.sin_theta) + (y * self.cos_theta) + self.global_curr_y
 
         return global_x, global_y
 
@@ -689,7 +700,7 @@ class PurePursuit:
                            error: float = 0.05) -> bool:
         """
             Returns True if x1 and x2 are the within error AND y1 and y2 are within error
-            If alt_inputs is true compares x1/y1 and x2/y2 instead
+            If alt_inputs is true compares x1/y1 AND x2/y2 instead
         """
         if alt_inputs:
             return self.float_equal(x1, y1, error=error) and self.float_equal(x2, y2, error=error)
@@ -752,6 +763,9 @@ def main(args: List[str]) -> None:
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
     waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
     waypoints.rename(columns={"# x_m": "x", " y_m": "y"}, inplace=True)
+
+    # TODO remove this. Selects only 2 rows
+    waypoints = waypoints.iloc[[0, 10]]
 
     initialise_car_pos(waypoints)
 
