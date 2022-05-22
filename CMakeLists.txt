@@ -95,7 +95,7 @@ if(DEFINED CATKIN_DEVEL_PREFIX)
     scripts/purepursuit.py
     scripts/followthegap.py
     scripts/wallfollowing.py
-    scripts/waypoint_logger.py
+    scripts/laptimer.py
     DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )
 

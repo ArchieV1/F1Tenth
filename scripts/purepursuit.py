@@ -23,8 +23,6 @@ from visualization_msgs.msg import Marker
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 from scipy.spatial.transform import Rotation
 
-from laptimer import float_equal, float_equal_double
-
 
 class PurePursuit:
     POSE_TOPIC = "/gt_pose"
@@ -446,6 +444,24 @@ class PurePursuit:
         return global_x, global_y
 
 
+def float_equal(val1: float, val2: float, error: float = 0.05) -> bool:
+    """
+        Returns True if val1 and val2 are within error
+    """
+    return val1 - error <= val2 <= val1 + error
+
+
+def float_equal_double(x1: float, x2: float, y1: float, y2: float, alt_inputs: bool = False,
+                       error: float = 0.05) -> bool:
+    """
+        Returns True if x1 and x2 are the within error AND y1 and y2 are within error
+        If alt_inputs is true compares x1/y1 AND x2/y2 instead
+    """
+    if alt_inputs:
+        return float_equal(x1, y1, error=error) and float_equal(x2, y2, error=error)
+    return float_equal(x1, x2, error=error) and float_equal(y1, y2, error=error)
+
+
 def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_waypoint: int = 1) -> None:
     """
         Teleport car to initial position/orientation
@@ -487,7 +503,7 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
     initialpose_publisher.publish(message)
 
 
-def main(args: List[str]) -> None:
+def main(args: list) -> None:
     # https://vinesmsuic.github.io/2020/09/29/robotics-purepersuit/#importance-of-visualizations
     # Interesting way to smooth waypoints
 
