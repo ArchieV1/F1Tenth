@@ -23,17 +23,20 @@ from visualization_msgs.msg import Marker
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 from scipy.spatial.transform import Rotation
 
+from laptimer import float_equal, float_equal_double
+
+
 class PurePursuit:
     POSE_TOPIC = "/gt_pose"
     DRIVE_TOPIC = "/pp_drive"
 
-    LOOKAHEAD_DEFAULT = 4
+    LOOKAHEAD_DEFAULT = 2
     # __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
     # MAX_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT + __LOOKAHEAD_DIFFERENCE
     # MIN_WAYPOINT_DISTANCE = LOOKAHEAD_DEFAULT - __LOOKAHEAD_DIFFERENCE
 
-    STRAIGHTS_SPEED = 5.0 / 10
-    CORNERS_SPEED = 3.0 / 10
+    STRAIGHTS_SPEED = 5.0 #/ 5
+    CORNERS_SPEED = 3.0 #`/ 5
     STRAIGHTS_STEERING_ANGLE = radians(10)
     STEERING_ANGLE_CONSTANT = 1  # Curvature = K (2|y|)/(L^2)
 
@@ -44,10 +47,9 @@ class PurePursuit:
     target_dist_diff = None
     """Distance of target from self.LOOKAHEAD"""
 
-    local_viable_waypoints = None
-    """Waypoints that are ahead of the car and within reasonable MAX_WAYPOINT_LOOKAHEAD > X > MIN_WAYPOINT_LOOKAHEAD"""
-    VIABLE_WAYPOINT_ANGLE = radians(70)
-    """Positive number in radians. Will look +- this number to find viable waypoints"""
+    VIABLE_WAYPOINT_ANGLE = radians(20)
+    """Positive number of radians from the +X axis (Straight ahead).
+    Only waypoints where (LOCAL) `tan(x/y)<VIABLE_WAYPOINT_ANGLE` will be considered viable waypoints"""
 
     header = None
     global_waypoints = None
@@ -103,8 +105,8 @@ class PurePursuit:
 
         euler = euler_from_quaternion(quat)
         self.global_curr_angle = np.double(euler[2])  # From +X towards +Y
-        if self.global_curr_angle < 0:
-            self.global_curr_angle += radians(360)  # Translate from -180 -> +180 to 0 -> 360
+        # if self.global_curr_angle < 0:
+        #     self.global_curr_angle += radians(360)  # Translate from -180 -> +180 to 0 -> 360
 
         # Caching for global_to_local and local_to_global
         self.cos_theta = cos(self.global_curr_angle)
@@ -137,7 +139,7 @@ class PurePursuit:
             Use a tight error tolerance as the car's position updates often
         """
 
-        if self.float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y,
+        if float_equal_double(self.global_curr_x, self.pose_previous.position.x, self.global_curr_y,
                                    self.pose_previous.position.y, error=error):
             # rospy.loginfo(f"NotMoving")
             return True
@@ -148,7 +150,7 @@ class PurePursuit:
             Returns True if car's current x AND y coords are within error of target coords
         """
 
-        if self.float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y,
+        if float_equal_double(self.global_tar_x, self.global_curr_x, self.global_curr_y, self.global_tar_y,
                                    error=error):
             # rospy.loginfo("HasReachedTarget")
             return True
@@ -179,25 +181,29 @@ class PurePursuit:
             local_x, local_y = self.global_to_local_coords(row[0], row[1])
             # rospy.loginfo(f"Localxy: {local_x, local_y}")
 
-            # Anywhere in front just not underneath (Using local coords)
-            if local_y > 0 or (local_y >= 0 and local_x != 0):
-                dist_from_car = self.distance_to_point(local_x, local_y)
-                diff_dist_lookahead = dist_from_car - self.lookahead_dist
+            # Anywhere in front of the car (But not underneath)
+            if local_x > 0 or (local_x >= 0 and local_y != 0):
+                # Within the angle range (Angle is from the +X axis in front of the car)
+                if local_y == 0.0 or tan(local_x/local_y) < self.VIABLE_WAYPOINT_ANGLE:
+                    dist_from_car = self.distance_to_point(local_x, local_y)
+                    diff_dist_lookahead = dist_from_car - self.lookahead_dist
 
-                # If better than previous (Closer to lookahead)
-                if abs(diff_dist_lookahead) < abs(self.target_dist_diff):
-                    self.target_dist_diff = diff_dist_lookahead
+                    # If better than previous (Closer to lookahead)
+                    if abs(diff_dist_lookahead) < abs(self.target_dist_diff):
+                        # Log the info again
+                        self.global_to_local_coords(row[0], row[1], log=True)
+                        self.target_dist_diff = diff_dist_lookahead
 
-                    self.global_tar_x = row[0]
-                    self.global_tar_y = row[1]
+                        self.global_tar_x = row[0]
+                        self.global_tar_y = row[1]
 
-                    self.local_tar_x = local_x
-                    self.local_tar_y = local_y
+                        self.local_tar_x = local_x
+                        self.local_tar_y = local_y
 
+        # rospy.loginfo(f"TargetIs: L{np.round([self.local_tar_x, self.local_tar_y], 2)}; G{np.round([self.global_tar_x, self.global_tar_y], 2)}; Angle{np.round(degrees(self.global_curr_angle), 2)}; SIN/COS{np.round([self.sin_theta, self.cos_theta], 2)}")
         if self.local_tar_x is None:
             rospy.logerr(f"No Viable Waypoints\n"
-                         f"Global Waypoints: {self.global_waypoints}\n\n"
-                         f"Viable Waypoints: {self.local_viable_waypoints}")
+                         f"Global Waypoints: {self.global_waypoints}\n\n")
             exit()
 
     def distance_to_point(self, x: float, y: float) -> float:
@@ -292,7 +298,7 @@ class PurePursuit:
             atan(o/a) = atan (x/y)
             atan(1/m) = atan((x^2 + y^2) / 2x)
         """
-        to_angle = degrees(atan(self.WHEELBASE/curvature))
+        to_angle = degrees(atan(self.WHEELBASE / curvature))
 
         if to_angle >= 180:
             to_angle = 360 - to_angle
@@ -382,7 +388,8 @@ class PurePursuit:
         rospy.loginfo_throttle(1,
                                f"Aiming for L({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) "
                                f"Gl({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg "
-                               f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away)")
+                               f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away) "
+                               f"G->L({np.round(self.global_to_local_coords(self.global_tar_x, self.global_tar_y), 3)} @ {round(degrees(self.global_curr_angle), 3)})")
         return angle
 
     def publish_drive_msg(self, angle: float) -> None:
@@ -408,7 +415,7 @@ class PurePursuit:
 
         self.drive_publisher.publish(drive_msg)
 
-    def global_to_local_coords(self, tar_x: float, tar_y: float) -> (float, float):
+    def global_to_local_coords(self, tar_x: float, tar_y: float, log: bool = False) -> (float, float):
         # https://gamedev.stackexchange.com/a/109377
         # Checked this answer and think is correct
 
@@ -420,9 +427,11 @@ class PurePursuit:
         loc_y = (-x * self.sin_theta) + (y * self.cos_theta)
 
         # TODO remove test (Line below)
-        # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(self.global_curr_angle), 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
-        # rospy.loginfo(f"Target: {tar_x, tar_y} -> Local:{loc_x, loc_y}; Angle {degrees(self.global_curr_angle)}; GlobalCurr: {self.global_curr_x, self.global_curr_y}; Cos/Sin: {self.cos_theta, self.sin_theta}")
-
+        if log:
+            return
+            # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(self.global_curr_angle), 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
+            # rospy.loginfo(f"Target: {tar_x, tar_y} -> Local:{loc_x, loc_y}; Angle {degrees(self.global_curr_angle)}; GlobalCurr: {self.global_curr_x, self.global_curr_y}; Cos/Sin: {self.cos_theta, self.sin_theta}")
+            rospy.loginfo(f"X info: GTar{round(tar_y, 2)}; GCur{round(self.global_curr_x, 2)}; angle{round(degrees(self.global_curr_angle))}; COS/SIN{np.round((self.cos_theta, self.sin_theta), 2)}")
         # rospy.loginfo(f"G->Local({loc_x, loc_y})")
         return loc_x, loc_y
 
@@ -435,22 +444,6 @@ class PurePursuit:
         global_y = (x * self.sin_theta) + (y * self.cos_theta) + self.global_curr_y
 
         return global_x, global_y
-
-    def float_equal(self, val1: float, val2: float, error: float = 0.05) -> bool:
-        """
-            Returns True if val1 and val2 are within error
-        """
-        return val1 - error <= val2 <= val1 + error
-
-    def float_equal_double(self, x1: float, x2: float, y1: float, y2: float, alt_inputs: bool = False,
-                           error: float = 0.05) -> bool:
-        """
-            Returns True if x1 and x2 are the within error AND y1 and y2 are within error
-            If alt_inputs is true compares x1/y1 AND x2/y2 instead
-        """
-        if alt_inputs:
-            return self.float_equal(x1, y1, error=error) and self.float_equal(x2, y2, error=error)
-        return self.float_equal(x1, x2, error=error) and self.float_equal(y1, y2, error=error)
 
 
 def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_waypoint: int = 1) -> None:
