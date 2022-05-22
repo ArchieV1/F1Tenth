@@ -383,11 +383,11 @@ class PurePursuit:
         # angle = P + I + D  # angle output is sum of components
 
         # rospy.loginfo(f"D: {distance}, x: {waypoint_x}, curv: {curvature}")
-        rospy.loginfo_throttle(1,
-                               f"Aiming for L({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) "
-                               f"Gl({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg "
-                               f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away) "
-                               f"G->L({np.round(self.global_to_local_coords(self.global_tar_x, self.global_tar_y), 3)} @ {round(degrees(self.global_curr_angle), 3)})")
+        # rospy.loginfo_throttle(1,
+        #                        f"Aiming for L({round(waypoint_x, 3)}, {round(waypoint_y, 3)}) "
+        #                        f"Gl({round(self.global_tar_x, 3)}, {round(self.global_tar_y, 3)}) at {round(degrees(angle), 3)}deg "
+        #                        f"(+{round(self.target_dist_diff, 4)}m from {self.lookahead_dist}) ({round(distance, 4)}m away) "
+        #                        f"G->L({np.round(self.global_to_local_coords(self.global_tar_x, self.global_tar_y), 3)} @ {round(degrees(self.global_curr_angle), 3)})")
         return angle
 
     def publish_drive_msg(self, angle: float) -> None:
@@ -424,13 +424,6 @@ class PurePursuit:
         loc_x = (x * self.cos_theta) + (y * self.sin_theta)
         loc_y = (-x * self.sin_theta) + (y * self.cos_theta)
 
-        # TODO remove test (Line below)
-        if log:
-            return
-            # rospy.loginfo(f"GLOBAL/LOCAL->GLOBAL: ({round(degrees(self.global_curr_angle), 2)}) {self.float_equal_double(tar_x, tar_y, *self.local_to_global_coords(loc_x, loc_y), alt_inputs=True)}")
-            # rospy.loginfo(f"Target: {tar_x, tar_y} -> Local:{loc_x, loc_y}; Angle {degrees(self.global_curr_angle)}; GlobalCurr: {self.global_curr_x, self.global_curr_y}; Cos/Sin: {self.cos_theta, self.sin_theta}")
-            rospy.loginfo(f"X info: GTar{round(tar_y, 2)}; GCur{round(self.global_curr_x, 2)}; angle{round(degrees(self.global_curr_angle))}; COS/SIN{np.round((self.cos_theta, self.sin_theta), 2)}")
-        # rospy.loginfo(f"G->Local({loc_x, loc_y})")
         return loc_x, loc_y
 
     def local_to_global_coords(self, x: float, y: float) -> (float, float):

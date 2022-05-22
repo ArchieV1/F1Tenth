@@ -75,6 +75,7 @@ class LapTimer:
         if self.race_not_started and self.pose_previous is not None:
             # If moving then the race has begun
             if self.is_moving():
+                rospy.loginfo("fRace has begun!")
                 self.df_lap_times.iloc[0]["race_start"] = self.curr_time
                 self.race_start_time = self.curr_time
                 self.race_not_started = False
@@ -91,6 +92,7 @@ class LapTimer:
                 file_name = "../results/" + curr_time + "." + self.controller_name + "." + self.map_name + ".csv"
                 self.df_lap_times.to_csv(file_name, sep=',', index=False)
 
+                rospy.loginfo(f"Race has ended!")
                 self.race_complete = True
             # else we keep waiting until the race has ended
 
