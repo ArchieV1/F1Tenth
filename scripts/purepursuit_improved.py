@@ -26,7 +26,7 @@ from scipy.spatial.transform import Rotation
 
 class PurePursuit:
     POSE_TOPIC = "/gt_pose"
-    DRIVE_TOPIC = "/pp_drive"
+    DRIVE_TOPIC = "/pp_improv_drive"
 
     LOOKAHEAD_DEFAULT = 2
     # __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
@@ -350,12 +350,11 @@ def float_equal_double(x1: float, x2: float, y1: float, y2: float, alt_inputs: b
         return float_equal(x1, y1, error=error) and float_equal(x2, y2, error=error)
     return float_equal(x1, x2, error=error) and float_equal(y1, y2, error=error)
 
-
 def main(args: list) -> None:
     # https://vinesmsuic.github.io/2020/09/29/robotics-purepersuit/#importance-of-visualizations
     # Interesting way to smooth waypoints
 
-    rospy.init_node("pure_pursuit", anonymous=True)
+    rospy.init_node("pure_pursuit_improv", anonymous=True)
 
     # Load raceline (The path to follow on this map)
     map_uri = args[1]
@@ -373,7 +372,7 @@ def main(args: list) -> None:
 
 
 if __name__ == '__main__':
-    print("PP running...")
+    print("PPi running...")
     try:
         main(sys.argv)
     except rospy.ROSInterruptException:

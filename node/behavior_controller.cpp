@@ -43,6 +43,8 @@ private:
     int ftg_mux_idx;
     int pp_mux_idx;
     int wf_mux_idx;
+    int ftg_improv_mux_idx;
+    int pp_improv_mux_idx;
 
     // Mux controller array
     std::vector<bool> mux_controller;
@@ -59,6 +61,8 @@ private:
     int ftg_button_idx;
     int pp_button_idx;
     int wf_button_idx;
+    int ftg_improv_button_idx;
+    int pp_improv_button_idx;
 
     // Key indices
     std::string joy_key_char;
@@ -71,6 +75,8 @@ private:
     std::string ftg_key_char;
     std::string pp_key_char;
     std::string wf_key_char;
+    std::string ftg_improv_key_char;
+    std::string pp_improv_key_char;
 
     // Is ebrake on? (not engaged, but on)
     bool safety_on;
@@ -131,6 +137,8 @@ public:
         n.getParam("ftg_mux_idx", ftg_mux_idx);
         n.getParam("pp_mux_idx", pp_mux_idx);
         n.getParam("wf_mux_idx", wf_mux_idx);
+        n.getParam("ftg_improv_mux_idx", ftg_improv_mux_idx);
+        n.getParam("pp_improv_mux_idx", pp_improv_mux_idx);
 
         // Get button indices
         n.getParam("joy_button_idx", joy_button_idx);
@@ -143,6 +151,8 @@ public:
         n.getParam("ftg_button_idx", ftg_button_idx);
         n.getParam("pp_button_idx", pp_button_idx);
         n.getParam("wf_button_idx", wf_button_idx);
+        n.getParam("ftg_improv_button_idx", ftg_improv_button_idx);
+        n.getParam("pp_improv_button_idx", pp_improv_button_idx);
 
         // Get key indices
         n.getParam("joy_key_char", joy_key_char);
@@ -155,6 +165,8 @@ public:
         n.getParam("ftg_key_char", ftg_key_char);
         n.getParam("pp_key_char", pp_key_char);
         n.getParam("wf_key_char", wf_key_char);
+        n.getParam("ftg_improv_key_char", ftg_improv_key_char);
+        n.getParam("pp_improv_key_char", pp_improv_key_char);
 
         // Initialize the mux controller 
         n.getParam("mux_size", mux_size);
@@ -347,6 +359,14 @@ public:
             // Wall following
             toggle_mux(wf_mux_idx, "WallFollowing (WF) Planner");
         }
+        if (msg.buttons[ftg_improv_button_idx]) {
+            // Follow the gap
+            toggle_mux(ftg_improv_mux_idx, "FollowTheGap improved (FTGi) Planner");
+        }
+        if (msg.buttons[pp_improv_button_idx]) {
+            // Pure pursuit
+            toggle_mux(pp_improv_mux_idx, "PurePursuit improved (PPi) Planner");
+        }
     }
 
     void key_callback(const std_msgs::String & msg) {
@@ -381,17 +401,24 @@ public:
         // }
         if (msg.data == ftg_key_char) {
            // Follow the gap
-           toggle_mux(ftg_mux_idx, "FTG Planner");
+           toggle_mux(ftg_mux_idx, "FollowTheGap (FTG) Planner");
         }
         if (msg.data == pp_key_char) {
            // Pure pursuit
-           toggle_mux(pp_mux_idx, "PP Planner");
+           toggle_mux(pp_mux_idx, "PurePursuit (PP) Planner");
         }
         if (msg.data == wf_key_char) {
            // Scan matching
-           toggle_mux(wf_mux_idx, "Scan Match Planner");
+           toggle_mux(wf_mux_idx, "WallFollowing Planner");
         }
-
+        if (msg.data == ftg_improv_key_char) {
+            // Follow the gap improved
+            toggle_mux(ftg_improv_mux_idx, "FollowTheGap improved (FTGi) Planner");
+        }
+        if (msg.data == pp_improv_key_char) {
+            // Pure pursuit improved
+            toggle_mux(pp_improv_mux_idx, "PurePursuit improved (PPi) Planner");
+        }
     }
 
     void laser_callback(const sensor_msgs::LaserScan & msg) {

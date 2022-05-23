@@ -47,7 +47,7 @@ map_free_threshold: 0.8
 ttc_threshold: 0.01
 
 # Indices for mux controller
-mux_size: 8
+mux_size: 10
 joy_mux_idx: 0
 key_mux_idx: 1
 random_walker_mux_idx: 2
@@ -59,6 +59,8 @@ new_method_mux_idx: -1
 ftg_mux_idx: 5
 pp_mux_idx: 6
 wf_mux_idx: 7
+pp_improv_mux_idx: 8
+ftg_improv_mux_idx: 9
 
 # Enables joystick if true
 joy: true
@@ -77,6 +79,8 @@ new_button_idx: -1
 ftg_button_idx: 7
 pp_button_idx: 8
 wf_button_idx: 9
+pp_improv_button_idx: 10
+ftg_improv_button_idx: 11
 
 # Keyboard characters for toggling mux
 joy_key_char: "j"
@@ -90,6 +94,8 @@ new_key_char: "z"
 ftg_key_char: "f"
 pp_key_char: "p"
 wf_key_char: "g"
+pp_improv_key_char: "o"
+ftg_improv_key_char: "h"
 
 # Keyboard driving params
 keyboard_speed: 1.8  # meters/second
@@ -122,6 +128,8 @@ new_drive_topic: "/new_drive"
 ftg_drive_topic: "/ftg_drive"
 pp_drive_topic: "/pp_drive"
 wf_drive_topic: "/wf_drive"
+pp_improv_drive_topic: "/pp_improv_drive"
+ftg_improv_drive_topic: "/ftg_improv_drive"
 
 # name of file to write collision log to 
 collision_file: "collision_file"

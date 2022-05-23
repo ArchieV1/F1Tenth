@@ -13,7 +13,13 @@
   The ones inside /f1tenth_racetracks/ all have waypoints for algorithms to follow (Eg Pure Pursuit)
   They are all much larger though so speeds need to be increased
   -->
+
   <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Austin/Austin_map.yaml"/>
+<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/BrandsHatch/BrandsHatch_map.yaml"/>-->
+<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Budapest/Budapest_map.yaml"/>-->
+<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Catalunya/Catalunya_map.yaml"/>-->
+<!--    <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Hockenheim/Hockenheim_map.yaml"/>-->
+
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map)"/>
 
   <!-- Launch the racecar model -->
@@ -63,7 +69,15 @@
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 
-  <node pkg="f1tenth_simulator" name="laptimer"  type="laptimer.py">
+  <node pkg="f1tenth_simulator" name="laptimer"  type="laptimer.py" args="$(arg map)">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
+  <node pkg="f1tenth_simulator" name="ftg_improv"  type="followthegap_improved.py">
+    <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
+  </node>
+
+  <node pkg="f1tenth_simulator" name="pure_pur_improv"  type="purepursuit_improved.py" args="$(arg map)">
     <rosparam command="load" file="$(find f1tenth_simulator)/params.yaml"/>
   </node>
 

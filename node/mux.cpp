@@ -150,6 +150,20 @@ public:
         n.getParam("wf_drive_topic", wf_drive_topic);
         n.getParam("wf_mux_idx", wf_mux_idx);
         add_channel(wf_drive_topic, drive_topic, wf_mux_idx);
+
+        // FTGi = Follow the gap improved
+        int ftg_improv_mux_idx;
+        std::string ftg_improv_drive_topic;
+        n.getParam("ftg_improv_drive_topic", ftg_improv_drive_topic);
+        n.getParam("ftg_improv_mux_idx", ftg_improv_mux_idx);
+        add_channel(ftg_improv_drive_topic, drive_topic, ftg_improv_mux_idx);
+
+        // PPi = Pure Pursuit improved
+        int pp_improv_mux_idx;
+        std::string pp_improv_drive_topic;
+        n.getParam("pp_improv_drive_topic", pp_improv_drive_topic);
+        n.getParam("pp_improv_mux_idx", pp_improv_mux_idx);
+        add_channel(pp_improv_drive_topic, drive_topic, pp_improv_mux_idx);
     }
 
     void add_channel(std::string channel_name, std::string drive_topic, int mux_idx_) {
