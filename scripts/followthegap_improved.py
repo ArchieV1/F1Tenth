@@ -2,7 +2,7 @@
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
-from math import degrees, radians
+from math import radians, atan
 import numpy as np
 
 
@@ -12,8 +12,9 @@ class FollowTheGap:
 
     BUBBLE_RADIUS = 160  # 160cm
     PREPROCESS_CONV_SIZE = 3
-    BEST_POINT_CONV_SIZE = 80
-    MAX_LIDAR_DIST = 3000000  # 3m
+    TARGET_CONVOLVE_SIZE = 80
+    MAX_LIDAR_DIST = 10  # 10m
+    MIN_ZEROING_RANGE = 3  # 3m
 
     STRAIGHTS_SPEED = 5.0
     CORNERS_SPEED = 3.0
@@ -24,6 +25,8 @@ class FollowTheGap:
 
         self.scan_subscriber = rospy.Subscriber(self.SCAN_TOPIC, LaserScan, self.process_lidar, queue_size=1)
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
+
+        self.CAR_WIDTH = rospy.get_param("width", 0.2032)
 
     def preprocess_lidar(self, ranges: list) -> np.array:
         """
@@ -36,8 +39,8 @@ class FollowTheGap:
         # Remove lidar data from behind car
         proc_ranges = np.array(ranges[135:-135])
 
-        # Set each value to the mean over a given window (Averages the data)
-        proc_ranges = np.convolve(proc_ranges, np.ones(self.PREPROCESS_CONV_SIZE), 'same') / self.PREPROCESS_CONV_SIZE
+        # Set each value to the mean over a PREPROCESS_CONV_SIZE window (Averages the data)
+        # proc_ranges = np.convolve(proc_ranges, np.ones(self.PREPROCESS_CONV_SIZE), 'same') / self.PREPROCESS_CONV_SIZE
         proc_ranges = np.clip(proc_ranges, 0, self.MAX_LIDAR_DIST)
         return proc_ranges
 
@@ -57,22 +60,23 @@ class FollowTheGap:
         for slic in slices[1:]:
             slice_len = slic.stop - slic.start
             if slice_len > max_len:
-                max_len = slice_len
-                chosen_slice = slic
+                # IMPROVEMENT: Check car will actually fit through gap
+                max_val = np.argmax(masked[slic.start:slic.stop])
+                if max_val != 0 and atan((self.CAR_WIDTH / 2) / max_val) < (slice_len * self.radians_per_elem):
+                    max_len = slice_len
+                    chosen_slice = slic
 
         return chosen_slice.start, chosen_slice.stop
 
-    def find_target(self, indexes: tuple, ranges: np.array) -> int:
+    def find_target(self, start_i: int, end_i: int, ranges: np.array) -> int:
         """
             indexes: Start and end indices of max-gap range
             Return: index of target within the ranges
         """
-        start_i = indexes[0]
-        end_i = indexes[1]
+        # Do a sliding window average over the data in the max gap
+        # Will help the car to avoid hitting corners (Without this the car hits tight corners)
+        averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.TARGET_CONVOLVE_SIZE), 'same') / self.TARGET_CONVOLVE_SIZE
 
-        # Do a sliding window average over the data in the max gap this will help the car to avoid hitting corners
-        averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.BEST_POINT_CONV_SIZE),
-                                       'same') / self.BEST_POINT_CONV_SIZE
         return averaged_max_gap.argmax() + start_i
 
     def get_angle(self, range_index, range_len) -> float:
@@ -109,7 +113,7 @@ class FollowTheGap:
 
     def process_lidar(self, laser_scan: LaserScan) -> None:
         """
-            Process each LiDAR scan as described by the FollowTheGap algorithm & publish drive message
+            Process each scan as described by the FollowTheGap algorithm then publish drive message
         """
         # Preprocess the Lidar Information (Remove extra info)
         proc_ranges = self.preprocess_lidar(laser_scan.ranges)
@@ -117,23 +121,23 @@ class FollowTheGap:
         # Find closest point to car
         closest = proc_ranges.argmin()
 
-        # Eliminate all points inside 'bubble' (set them to zero)
-        min_index = closest - self.BUBBLE_RADIUS
-        max_index = closest + self.BUBBLE_RADIUS
-        if min_index < 0:
-            min_index = 0
-        if max_index >= len(proc_ranges):
-            max_index = len(proc_ranges) - 1
-        proc_ranges[min_index:max_index] = 0
-
-        # Find max length gap
-        indexes = self.find_max_gap(proc_ranges)
+        # IMPROVEMENT: Do not bother with zeroing if not necessary
+        if closest > self.MIN_ZEROING_RANGE:
+            # Eliminate all points inside 'bubble' (set them to zero)
+            min_index = closest - self.BUBBLE_RADIUS
+            max_index = closest + self.BUBBLE_RADIUS
+            if min_index < 0:
+                min_index = 0
+            if max_index >= len(proc_ranges):
+                max_index = len(proc_ranges) - 1
+            proc_ranges[min_index:max_index] = 0
 
         # Find the target
-        best = self.find_target(indexes, proc_ranges)
+        indexes = self.find_max_gap(proc_ranges)
+        target = self.find_target(*indexes, proc_ranges)
 
         # Get the final steering angle and publish it
-        angle = self.get_angle(best, len(proc_ranges))
+        angle = self.get_angle(target, len(proc_ranges))
         self.publish_drive_msg(angle)
 
 

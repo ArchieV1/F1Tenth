@@ -1,8 +1,11 @@
 #!/usr/bin/env python
+import math
+from itertools import tee, islice
+
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
-from math import degrees, radians
+from math import radians
 import numpy as np
 
 
@@ -62,14 +65,11 @@ class FollowTheGap:
 
         return chosen_slice.start, chosen_slice.stop
 
-    def find_target(self, indexes: tuple, ranges: np.array) -> int:
+    def find_target(self, start_i: int, end_i: int, ranges: np.array) -> int:
         """
             indexes: Start and end indices of max-gap range
             Return: index of target within the ranges
         """
-        start_i = indexes[0]
-        end_i = indexes[1]
-
         # Do a sliding window average over the data in the max gap this will help the car to avoid hitting corners
         averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.BEST_POINT_CONV_SIZE),
                                        'same') / self.BEST_POINT_CONV_SIZE
@@ -109,7 +109,7 @@ class FollowTheGap:
 
     def process_lidar(self, laser_scan: LaserScan) -> None:
         """
-            Process each LiDAR scan as described by the FollowTheGap algorithm & publish drive message
+            Process each scan as described by the FollowTheGap algorithm then publish drive message
         """
         # Preprocess the Lidar Information (Remove extra info)
         proc_ranges = self.preprocess_lidar(laser_scan.ranges)
@@ -117,7 +117,7 @@ class FollowTheGap:
         # Find closest point to car
         closest = proc_ranges.argmin()
 
-        # Eliminate all points inside 'bubble' (set them to zero)
+        # Eliminate all points inside 'bubble' (Set them to zero)
         min_index = closest - self.BUBBLE_RADIUS
         max_index = closest + self.BUBBLE_RADIUS
         if min_index < 0:
@@ -126,20 +126,18 @@ class FollowTheGap:
             max_index = len(proc_ranges) - 1
         proc_ranges[min_index:max_index] = 0
 
-        # Find max length gap
-        indexes = self.find_max_gap(proc_ranges)
-
         # Find the target
-        best = self.find_target(indexes, proc_ranges)
+        indexes = self.find_max_gap(proc_ranges)
+        target = self.find_target(*indexes, proc_ranges)
 
         # Get the final steering angle and publish it
-        angle = self.get_angle(best, len(proc_ranges))
+        angle = self.get_angle(target, len(proc_ranges))
         self.publish_drive_msg(angle)
 
 
 def main() -> None:
     rospy.init_node("ftg", anonymous=True)
-    _ = FollowTheGap()
+    FollowTheGap()
     rospy.spin()
 
 
