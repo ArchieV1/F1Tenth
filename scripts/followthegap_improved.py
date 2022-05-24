@@ -2,7 +2,7 @@
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
-from math import radians, atan
+from math import radians, atan, tan
 import numpy as np
 
 
@@ -52,21 +52,31 @@ class FollowTheGap:
         # mask the bubble
         masked = np.ma.masked_where(free_space_ranges == 0, free_space_ranges)
 
-        # get a slice for each contigous sequence of non-bubble data
+        # get a slice for each contiguous sequence of non-bubble data
         slices = np.ma.notmasked_contiguous(masked)
-        max_len = slices[0].stop - slices[0].start
-        chosen_slice = slices[0]
+        max_len = 0
+        chosen_slice = -1
 
-        for slic in slices[1:]:
+        for slic in slices:
             slice_len = slic.stop - slic.start
             if slice_len > max_len:
                 # IMPROVEMENT: Check car will actually fit through gap
-                max_val = np.argmax(masked[slic.start:slic.stop])
-                if max_val != 0 and atan((self.CAR_WIDTH / 2) / max_val) < (slice_len * self.radians_per_elem):
+                max_dist_i = np.argmax(free_space_ranges[slic.start:slic.stop])
+                max_dist = free_space_ranges[slic.start + max_dist_i]
+
+                smaller_slice_len = min([max_dist_i - slic.start, slic.stop - max_dist_i])
+                theta = smaller_slice_len * self.radians_per_elem
+
+                if abs(max_dist * tan(theta)) > self.CAR_WIDTH / 2:
                     max_len = slice_len
                     chosen_slice = slic
 
-        return chosen_slice.start, chosen_slice.stop
+        if chosen_slice != -1:
+            return chosen_slice.start, chosen_slice.stop
+        else:
+            # rospy.loginfo(f"MD:{max_dist}\n{free_space_ranges}\n{masked}\n{slices}")
+            rospy.loginfo(f"md{max_dist}, th{theta}")
+            return -1, -1
 
     def find_target(self, start_i: int, end_i: int, ranges: np.array) -> int:
         """
@@ -75,7 +85,8 @@ class FollowTheGap:
         """
         # Do a sliding window average over the data in the max gap
         # Will help the car to avoid hitting corners (Without this the car hits tight corners)
-        averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.TARGET_CONVOLVE_SIZE), 'same') / self.TARGET_CONVOLVE_SIZE
+        averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.TARGET_CONVOLVE_SIZE), 'same') \
+                           / self.TARGET_CONVOLVE_SIZE
 
         return averaged_max_gap.argmax() + start_i
 
@@ -88,7 +99,7 @@ class FollowTheGap:
         steering_angle = lidar_angle / 2
         return steering_angle
 
-    def publish_drive_msg(self, angle: float) -> None:
+    def publish_drive_msg(self, angle: float, speed: float = float("inf")) -> None:
         """
             Publish the final steering angle and speed to self.DRIVE_TOPIC
             Speed is determined by:
@@ -96,11 +107,14 @@ class FollowTheGap:
                 self.CORNERS_SPEED
                 self.STRAIGHTS_SPEED
         """
-
-        if abs(angle) > self.STRAIGHTS_STEERING_ANGLE:
-            speed = self.CORNERS_SPEED
+        # If using default speed value (`float("inf")` is default as it will never be used or calculated in code)
+        if speed == float("inf"):
+            if abs(angle) > self.STRAIGHTS_STEERING_ANGLE:
+                speed = self.CORNERS_SPEED
+            else:
+                speed = self.STRAIGHTS_SPEED
         else:
-            speed = self.STRAIGHTS_SPEED
+            speed = 0
 
         drive_msg = AckermannDriveStamped()
         drive_msg.header.stamp = rospy.Time.now()
@@ -134,11 +148,16 @@ class FollowTheGap:
 
         # Find the target
         indexes = self.find_max_gap(proc_ranges)
-        target = self.find_target(*indexes, proc_ranges)
+        # If car will fit through gap
+        if indexes != (-1, -1):
+            target = self.find_target(*indexes, proc_ranges)
 
-        # Get the final steering angle and publish it
-        angle = self.get_angle(target, len(proc_ranges))
-        self.publish_drive_msg(angle)
+            # Get the final steering angle and publish it
+            angle = self.get_angle(target, len(proc_ranges))
+            self.publish_drive_msg(angle)
+        else:
+            rospy.logerr(f"Car will not fit through any gaps. Stopping car")
+            self.publish_drive_msg(0, 0)
 
 
 def main() -> None:
