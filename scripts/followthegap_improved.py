@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import math
+import time
+
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
 from sensor_msgs.msg import LaserScan
@@ -17,13 +19,15 @@ class FollowTheGapi:
 
     STRAIGHTS_SPEED = 5.0  # mps
     CORNERS_SPEED = 3.0  # mps
-    CAR_DIVIDER = 1.
+    CAR_DIVIDER = 1.9
     """What do divide car width by to get "half" of the car's width"""
     STRAIGHTS_STEERING_ANGLE = radians(10)
 
     BUBBLE_RADIUS = None
     radians_per_elem = None
     """To be set every time a scan is received"""
+
+    cycle_times = []
 
     def __init__(self):
         self.scan_subscriber = rospy.Subscriber(self.SCAN_TOPIC, LaserScan, self.process_lidar, queue_size=1)
@@ -70,7 +74,7 @@ class FollowTheGapi:
         theta = math.atan((self.CAR_WIDTH / self.CAR_DIVIDER) / min(free_space_ranges[chosen_slice.start: chosen_slice.stop]))
         bubble_radius = int(math.ceil(theta / self.radians_per_elem))
 
-        if chosen_slice.stop - chosen_slice < bubble_radius * 2:
+        if chosen_slice.stop - chosen_slice.start < bubble_radius * 2:
             # Car will not fit through gap
             return -1, -1
         return chosen_slice.start, chosen_slice.stop
@@ -83,7 +87,6 @@ class FollowTheGapi:
         # Do a sliding window average over the data in the max gap this will help the car to avoid hitting corners
         averaged_max_gap = np.convolve(ranges[start_i:end_i], np.ones(self.BEST_POINT_CONV_SIZE),
                                        'same') / self.BEST_POINT_CONV_SIZE
-        # rospy.loginfo_throttle(0.25, f"FTG: {averaged_max_gap.argmax() + start_i}")
         return averaged_max_gap.argmax() + start_i
 
     def get_angle(self, range_index, range_len) -> float:
@@ -125,6 +128,7 @@ class FollowTheGapi:
         """
             Process each scan as described by the FollowTheGap algorithm then publish drive message
         """
+        start_time = time.time_ns() / 10**9
         # Preprocess the Lidar Information (Remove extra info)
         proc_ranges = self.preprocess_lidar(laser_scan.ranges)
 
@@ -149,6 +153,7 @@ class FollowTheGapi:
         # Find the target
         indexes = self.find_max_gap(proc_ranges)
         if indexes == (-1, -1):
+            rospy.logerr("Car will not fit through gap. Stopping car")
             self.publish_drive_msg(0, 0)
             return
         target = self.find_target(*indexes, proc_ranges)
@@ -156,6 +161,10 @@ class FollowTheGapi:
         # Get the final steering angle and publish it
         angle = self.get_angle(target, len(proc_ranges))
         self.publish_drive_msg(angle)
+
+        end_time = time.time_ns() / 10**9
+        self.cycle_times.append(end_time - start_time)
+        rospy.loginfo_throttle(15, f"{np.mean(self.cycle_times)}")
 
 
 def main() -> None:
