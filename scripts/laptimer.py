@@ -70,7 +70,7 @@ class LapTimer:
         euler = euler_from_quaternion(quat)
         self.curr_angle = np.double(euler[2])  # From +X towards +Y
 
-        self.curr_time = time.time()
+        self.curr_time = time.time_ns() / (10**9)  # Nanosecond precision while also still being in seconds
 
         # If race has not started
         if self.race_not_started and self.pose_previous is not None:
@@ -110,7 +110,7 @@ class LapTimer:
         except ValueError:
             self.controller_name = -1
 
-    def race_ended(self, float_error: float = 1, min_lap_time_ns: float = 1.5, moving_error: float = 0.00003) -> bool:
+    def race_ended(self, position_float_error: float = 1, min_lap_time: float = 1.5, moving_float_error: float = 0.00003) -> bool:
         """
             Lap has ended if:
                 Current position is (0, 0) (Within `error`)
@@ -118,9 +118,9 @@ class LapTimer:
                 If `min_lap_time` has elapsed since race start
         """
         return self.pose_previous is not None and \
-               float_equal_double(self.curr_x, 0, self.curr_y, 0, error=float_error) and \
-               self.is_moving(error=moving_error) and \
-               self.curr_time - self.race_start_time > min_lap_time_ns
+               float_equal_double(self.curr_x, 0, self.curr_y, 0, error=position_float_error) and \
+               self.is_moving(error=moving_float_error) and \
+               self.curr_time - self.race_start_time > min_lap_time
 
     def is_moving(self, error: float = 0.00003) -> bool:
         return not self.is_not_moving(error=error)
@@ -190,7 +190,6 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
         time.sleep(0.05)
         rospy.loginfo("Waiting for subscribers before positioning car")
 
-    # rospy.loginfo(f"Moving car to:\n{message}")
     initialpose_publisher.publish(message)
 
 
@@ -204,9 +203,6 @@ def main(args: list) -> None:
     # Put car in correct position
     # Load raceline (The path to follow on this map)
     map_uri = args[1]
-
-    # raceline_uri = map_uri.replace("map.yaml", "raceline.csv")
-    # raceline_uri = map_uri.replace("map.yaml", "DonkeySim_waypoints.txt")
 
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
     waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
