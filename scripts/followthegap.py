@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-import math
-from itertools import tee, islice
+import time
 
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -21,6 +20,8 @@ class FollowTheGap:
     STRAIGHTS_SPEED = 5.0
     CORNERS_SPEED = 3.0
     STRAIGHTS_STEERING_ANGLE = radians(10)
+
+    cycle_times = []
 
     def __init__(self):
         self.radians_per_elem = None
@@ -111,6 +112,8 @@ class FollowTheGap:
         """
             Process each scan as described by the FollowTheGap algorithm then publish drive message
         """
+        start_time = time.time_ns() / 10**9
+
         # Preprocess the Lidar Information (Remove extra info)
         proc_ranges = self.preprocess_lidar(laser_scan.ranges)
 
@@ -133,6 +136,10 @@ class FollowTheGap:
         # Get the final steering angle and publish it
         angle = self.get_angle(target, len(proc_ranges))
         self.publish_drive_msg(angle)
+
+        end_time = time.time_ns() / 10**9
+        self.cycle_times.append(end_time - start_time)
+        rospy.loginfo_throttle(15, f"{np.mean(self.cycle_times)}")
 
 
 def main() -> None:
