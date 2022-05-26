@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import io
+import math
 import sys
 import time
 from math import sqrt, degrees, radians, cos, acos, sin, tan, atan, atan2
@@ -27,6 +28,7 @@ from scipy.spatial.transform import Rotation
 class PurePursuit:
     POSE_TOPIC = "/gt_pose"
     DRIVE_TOPIC = "/pp_improv_drive"
+    SCAN_TOPIC = "scan"
 
     LOOKAHEAD_DEFAULT = 2
     # __LOOKAHEAD_DIFFERENCE = LOOKAHEAD_DEFAULT / 2
@@ -55,8 +57,11 @@ class PurePursuit:
     lookahead_dist = None
     """Lookahead distance in metres"""
 
-    pose_subscriber = None
-    drive_publisher = None
+    scan = None
+    """The most recent LiDAR scan"""
+    radians_per_elem = None
+    CAR_DIVIDER = 1.9
+    """What do divide car width by to get "half" of the car's width"""
 
     pose_previous = None
     pose_current = None
@@ -86,10 +91,20 @@ class PurePursuit:
         self.global_waypoints = waypoints
         self.lookahead_dist = lookahead
 
+        self.CAR_WIDTH = rospy.get_param("width", 0.2032)
+
         self.pose_subscriber = rospy.Subscriber(self.POSE_TOPIC, PoseStamped, self.pose_callback, queue_size=1)
+        self.scan_subscriber = rospy.Subscriber(self.SCAN_TOPIC, LaserScan, self.scan_callback, queue_size=1)
         self.drive_publisher = rospy.Publisher(self.DRIVE_TOPIC, AckermannDriveStamped, queue_size=10)
 
+    def scan_callback(self, scan: LaserScan):
+        self.scan = scan
+        self.radians_per_elem = (2 * np.pi) / len(scan.ranges)
+
     def pose_callback(self, pose_stamped: PoseStamped):
+        if self.scan is None:
+            return
+
         self.pose_current = pose_stamped.pose
         self.header = pose_stamped.header
 
@@ -164,10 +179,8 @@ class PurePursuit:
                 self.local_tar_y
 
             Viable waypoints are:
-                ##Within +-VIABLE_WAYPOINT_ANGLE rad of the direction of the car
                 In front of the car
-                ##Greater than MIN_WAYPOINT_DISTANCE away
-                ##Less than MAX_WAYPOINT_DISTANCE way
+                Not behind an object
         """
 
         # Convert global coords to local coords (of the car)
@@ -188,21 +201,62 @@ class PurePursuit:
 
                     # If better than previous (Closer to lookahead)
                     if abs(diff_dist_lookahead) < abs(self.target_dist_diff):
-                        # Log the info again
-                        self.global_to_local_coords(row[0], row[1], log=True)
-                        self.target_dist_diff = diff_dist_lookahead
 
-                        self.global_tar_x = row[0]
-                        self.global_tar_y = row[1]
+                        # If not behind a wall
+                        if self.waypoint_not_blocked(local_x, local_y):
+                            self.target_dist_diff = diff_dist_lookahead
 
-                        self.local_tar_x = local_x
-                        self.local_tar_y = local_y
+                            self.global_tar_x = row[0]
+                            self.global_tar_y = row[1]
+
+                            self.local_tar_x = local_x
+                            self.local_tar_y = local_y
 
         # rospy.loginfo(f"TargetIs: L{np.round([self.local_tar_x, self.local_tar_y], 2)}; G{np.round([self.global_tar_x, self.global_tar_y], 2)}; Angle{np.round(degrees(self.global_curr_angle), 2)}; SIN/COS{np.round([self.sin_theta, self.cos_theta], 2)}")
         if self.local_tar_x is None:
             rospy.logerr(f"No Viable Waypoints\n"
                          f"Global Waypoints: {self.global_waypoints}\n\n")
             exit()
+
+    def waypoint_not_blocked(self, x: float, y: float) -> bool:
+        """
+            x: Local x value of waypoint
+            y: Local y value of waypoint
+
+            Returns true if waypoint closer to car than the obstacle in that direction is
+        """
+        distance_to_waypoint = self.distance_to_point(x, y)
+        angle_to_point = self.angle_to_point(x, y)
+        index_of_target = math.ceil(angle_to_point)
+        distance_to_wall = self.scan.ranges[index_of_target]
+
+        will_hit_wall = True
+
+        # If not directly blocked
+        if distance_to_waypoint < distance_to_wall:
+            will_hit_wall = False
+
+            # Check if edge of car will clip it
+            theta = math.atan((self.CAR_WIDTH / self.CAR_DIVIDER) / distance_to_waypoint)
+            bubble_radius = int(math.ceil(theta / self.radians_per_elem))
+
+            min_index = index_of_target - bubble_radius
+            max_index = index_of_target + bubble_radius
+            if min_index < 0:
+                min_index = 0
+            if max_index >= len(self.scan.ranges):
+                max_index = len(self.scan.ranges) - 1
+
+            for i, dist_wall in enumerate(self.scan.ranges[min_index: max_index]):
+                # Using distance_to_waypoint isnt exactly mathematically correct but will do
+                if dist_wall < distance_to_waypoint:
+                    will_hit_wall = True
+
+        return not will_hit_wall
+
+    def angle_to_point(self, x:float, y: float) -> float:
+        angle = atan2(y, x)
+        return angle
 
     def distance_to_point(self, x: float, y: float) -> float:
         """
@@ -349,6 +403,7 @@ def float_equal_double(x1: float, x2: float, y1: float, y2: float, alt_inputs: b
     if alt_inputs:
         return float_equal(x1, y1, error=error) and float_equal(x2, y2, error=error)
     return float_equal(x1, x2, error=error) and float_equal(y1, y2, error=error)
+
 
 def main(args: list) -> None:
     # https://vinesmsuic.github.io/2020/09/29/robotics-purepersuit/#importance-of-visualizations
