@@ -350,8 +350,13 @@ def main(args: list) -> None:
     # Load raceline (The path to follow on this map)
     map_uri = args[1]
 
+    # Uncomment to use race line
     # raceline_uri = map_uri.replace("map.yaml", "raceline.csv")
+    # waypoints = pd.read_csv(raceline_uri, delimiter=";", dtype=float, header=2)
+    # waypoints.rename(columns={" x_m": "x", " y_m": "y"}, inplace=True)
+    # waypoints = waypoints[["x", "y"]]
 
+    # Uncomment to use centre line
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
     waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
     waypoints.rename(columns={"# x_m": "x", " y_m": "y"}, inplace=True)
