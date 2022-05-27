@@ -1,3 +1,4 @@
+import math
 from math import isnan, isinf, degrees, radians, atan, cos, sin
 
 import rospy
@@ -10,12 +11,12 @@ class WallFollowing:
     SCAN_TOPIC = "scan"
     DRIVE_TOPIC = "wf_drive"
 
-    STRAIGHTS_SPEED = 5.0 / 2.5
-    CORNERS_SPEED = 3.0 / 5
+    STRAIGHTS_SPEED = 5.0
+    CORNERS_SPEED = 3.0
     STRAIGHTS_STEERING_ANGLE = radians(10)
 
-    TARGET_RIGHT_DIST = 1  # In metres
-    LOOKAHEAD = 0.5  # Look 1m ahead
+    TARGET_RIGHT_DIST = 0.8  # In metres
+    LOOKAHEAD = 0.5  # In metres
 
     def __init__(self):
         self.scan_subscriber = rospy.Subscriber(self.SCAN_TOPIC, LaserScan, self.lidar_callback, queue_size=1)
@@ -59,7 +60,7 @@ class WallFollowing:
 
         # rospy.loginfo_throttle(2, f"Alpha: {degrees(alpha)}. Right dist {a}, b: {b}")
 
-        dist_t0 = b * cos(alpha)  # Distance to wall at y=0 global pos
+        dist_t0 = b * cos(alpha)  # Distance to wall at y=0 global coords
         dist_t1 = dist_t0 + self.LOOKAHEAD * sin(alpha)  # Distance to wall at y=0 in 1 LOOKAHEAD of distance in future
 
         # TODO decide  what lookahead. Product of speed * time to execute all of this??
@@ -67,10 +68,13 @@ class WallFollowing:
         error_t0 = self.TARGET_RIGHT_DIST - dist_t0
         error_t1 = self.TARGET_RIGHT_DIST - dist_t1
 
-        angle = self.PID_controller(error_t0, error_t1)
+        # Getting futher from wall
+        constant = 0.3
+        if error_t0 > error_t1:
+            angle = alpha * constant
+        else:
+            angle = alpha * constant
 
-        angle = alpha * 1.5
-        rospy.loginfo_throttle(2, f"Alpha: {degrees(alpha)}. Angle: {degrees(angle)}")
         self.publish_drive_msg(angle)
 
     def get_distance(self, data: LaserScan, angle: float) -> float:
@@ -82,7 +86,7 @@ class WallFollowing:
 
             Returns: Distance to object at angle angle
         """
-        angle = int(round(angle))
+        angle = int(math.ceil(angle))
         if isnan(data.ranges[angle]) or isinf(data.ranges[angle]):
             return 100
         return data.ranges[angle]
@@ -102,7 +106,7 @@ class WallFollowing:
         drive_msg.drive.steering_angle = angle
         drive_msg.drive.speed = speed
 
-        rospy.loginfo_throttle(2, f"Angle: {degrees(angle)}")
+        # rospy.loginfo_throttle(2, f"Angle: {degrees(angle)}")
         self.drive_publisher.publish(drive_msg)
 
     def PID_controller(self, prev_error: float, curr_error: float) -> float:
@@ -111,33 +115,35 @@ class WallFollowing:
             error_0 = Previous error term
             error_1 = Current error term
         """
-        prev_error *= 5
-        curr_error *= 5
+        # prev_error *= 5
+        # curr_error *= 5
         # https://youtu.be/qIpiqhO3ITY?t=1718
         # V0 =  Kp * err + Kd * (prev - curr)
 
         # Tune these
-        kp = 0.01
-        kd = 2
+        kp = 0.27 #0.015
+        kd = 0.2  #2
         ki = 0.0
 
         e = curr_error
+        prev_error = 0
 
         # Proportional:
         # Kp * e(t)
         proportional = kp * e
 
-        # Differential
-        # Kd * (d/dt)[e(t)]
-        differential = kd * (prev_error - e)
-
-        # Integral
+        # Integral:
         # Ki * integral[0, t, e(t')] dt' # Between 0 and t
         integral = 0
         integral = ki * integral
 
-        rospy.loginfo_throttle(2, f"Prop: {proportional}, diff: {differential}")
-        return proportional + differential + integral
+        # Differential:
+        # Kd * (d/dt)[e(t)]
+        differential = kd * (prev_error - e)
+
+        result = (proportional + integral + differential) / 50
+        rospy.loginfo_throttle(1, f"Prop: {proportional}, diff: {differential} => {degrees(result)}")
+        return result
         # https://github.com/KlrShaK/Wall_following_F1thenth/blob/main/race/scripts/control.py
 
 
@@ -148,6 +154,7 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    exit()
     print("WallFollowing running...")
     try:
         main()
