@@ -164,7 +164,7 @@ class FollowTheGapi:
 
         end_time = time.time_ns() / 10**9
         self.cycle_times.append(end_time - start_time)
-        rospy.loginfo_throttle(15, f"{np.mean(self.cycle_times)}")
+        # rospy.loginfo_throttle(15, f"{np.mean(self.cycle_times)}")
 
 
 def main() -> None:
