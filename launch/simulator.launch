@@ -14,10 +14,10 @@
   They are all much larger though so speeds need to be increased
   -->
 
-  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Austin/Austin_map.yaml"/>
+<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Austin/Austin_map.yaml"/>-->
 <!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/BrandsHatch/BrandsHatch_map.yaml"/>-->
 <!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Budapest/Budapest_map.yaml"/>-->
-<!--  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Catalunya/Catalunya_map.yaml"/>-->
+  <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Catalunya/Catalunya_map.yaml"/>
 <!--    <arg name="map" default="$(find f1tenth_simulator)/maps/f1tenth_racetracks/Hockenheim/Hockenheim_map.yaml"/>-->
 
   <node pkg="map_server" name="map_server" type="map_server" args="$(arg map)"/>

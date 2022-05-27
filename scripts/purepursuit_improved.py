@@ -224,7 +224,7 @@ class PurePursuit:
                 max_index = len(self.scan.ranges) - 1
 
             for i, dist_wall in enumerate(self.scan.ranges[min_index: max_index]):
-                # Using distance_to_waypoint isnt exactly mathematically correct but will do
+                # Using distance_to_waypoint isn't exactly mathematically correct but will do
                 if dist_wall < distance_to_waypoint:
                     will_hit_wall = True
 

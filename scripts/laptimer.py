@@ -3,7 +3,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from math import atan2
+from math import atan2, degrees
 
 import rospy
 from geometry_msgs.msg import PoseStamped, Quaternion, PoseWithCovarianceStamped
@@ -70,7 +70,7 @@ class LapTimer:
         euler = euler_from_quaternion(quat)
         self.curr_angle = np.double(euler[2])  # From +X towards +Y
 
-        self.curr_time = time.time_ns() / (10**9)  # Nanosecond precision while also still being in seconds
+        self.curr_time = time.time_ns() / (10 ** 9)  # Nanosecond precision while also still being in seconds
 
         # If race has not started
         if self.race_not_started and self.pose_previous is not None:
@@ -90,7 +90,8 @@ class LapTimer:
                 curr_time = datetime.fromtimestamp(self.curr_time)
                 curr_time = curr_time.strftime("%Y:%m:%d:%H:%M:%S")  # Year:Month:Day:Hour:Minute:Second
 
-                file_name = os.path.split(os.getcwd())[0] + "/catkin_ws/src/f1tenth_simulator/results/" + curr_time + "_" + str(self.controller_name) + "_" + self.map_name + ".csv"
+                file_name = os.path.split(os.getcwd())[0] + "/catkin_ws/src/f1tenth_simulator/results/" + curr_time + \
+                            "_" + str(self.controller_name) + "_" + self.map_name + ".csv"
                 self.df_lap_times.to_csv(file_name, sep=',', index=False)
 
                 rospy.loginfo(f"Race has ended! Data saved to `{file_name}`")
@@ -110,7 +111,8 @@ class LapTimer:
         except ValueError:
             self.controller_name = -1
 
-    def race_ended(self, position_float_error: float = 1, min_lap_time: float = 1.5, moving_float_error: float = 0.00003) -> bool:
+    def race_ended(self, position_float_error: float = 1, min_lap_time: float = 1.5,
+                   moving_float_error: float = 0.00003) -> bool:
         """
             Lap has ended if:
                 Current position is (0, 0) (Within `error`)
@@ -175,7 +177,8 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
     # https://answers.ros.org/question/181689/computing-posewithcovariances-6x6-matrix/
     roll = 0
     pitch = 0
-    yaw = -atan2(d_y, d_x)
+    # yaw = -atan2(d_y, d_x)
+    yaw = atan2(d_y, d_x)
 
     q = quaternion_from_euler(roll, pitch, yaw)
     message.pose.pose.orientation = Quaternion(*q)
@@ -190,6 +193,7 @@ def initialise_car_pos(waypoints: pd.DataFrame, init_waypoint: int = 0, target_w
         time.sleep(0.05)
         rospy.loginfo("Waiting for subscribers before positioning car")
 
+    rospy.loginfo(f"Placing car at: {(message.pose.pose.position.x, message.pose.pose.position.y, degrees(yaw))}")
     initialpose_publisher.publish(message)
 
 
@@ -201,9 +205,15 @@ def main(args: list) -> None:
     head, tail = os.path.split(head)
 
     # Put car in correct position
-    # Load raceline (The path to follow on this map)
     map_uri = args[1]
 
+    # Uncomment to use race line
+    # raceline_uri = map_uri.replace("map.yaml", "raceline.csv")
+    # waypoints = pd.read_csv(raceline_uri, delimiter=";", dtype=float, header=2)
+    # waypoints.rename(columns={" x_m": "x", " y_m": "y"}, inplace=True)
+    # waypoints = waypoints[["x", "y"]]
+
+    # Uncomment to use centre line
     raceline_uri = map_uri.replace("map.yaml", "centerline.csv")
     waypoints = pd.read_csv(raceline_uri, delimiter=",", dtype=float, header=0)
     waypoints.rename(columns={"# x_m": "x", " y_m": "y"}, inplace=True)
