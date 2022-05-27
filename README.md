@@ -1,3 +1,15 @@
+# FROM ARCHIE
+To run:
+Install all dependencies as explained below
+Run this command:
+```
+bash `find . -name build_*`
+```
+
+And the simulator should launch
+
+
+
 # THIS REPO IS NO LONGER MAINTAINED
 ## If you need a F1TENTH simulation in ROS, we have moved to a containerized ROS 2 simulation here: [https://github.com/f1tenth/f1tenth_gym_ros](https://github.com/f1tenth/f1tenth_gym_ros)
 
